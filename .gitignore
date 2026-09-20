@@ -1,0 +1,24 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Runtime data and downloaded model weights
+backend/data/*
+!backend/data/.gitkeep
+backend/models/*
+!backend/models/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS and editor files
+.DS_Store
+.vscode/
