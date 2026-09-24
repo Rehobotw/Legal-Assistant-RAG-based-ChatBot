@@ -8,6 +8,12 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.venvs/
+htmlcov/
+.coverage
+
+# Logs
+*.log
 
 # Runtime data and downloaded model weights
 backend/data/*
