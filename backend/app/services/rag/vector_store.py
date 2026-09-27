@@ -24,6 +24,6 @@ def get_ready_vector_store():
     store = get_vector_store()
     if store._collection.count() == 0:
         raise IndexNotReadyError(
-            "The precedent index is empty. Set OPENAI_API_KEY and run `python scripts/ingest.py --recreate` from backend/."
+            "The precedent index is empty. Run `python scripts/ingest.py --recreate` from backend/."
         )
     return store

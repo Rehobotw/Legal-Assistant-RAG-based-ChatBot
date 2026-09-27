@@ -1,16 +1,13 @@
-"""OpenAI embedding client used by the Chroma corpus."""
-
-from app.core.config import settings
+"""HuggingFace embedding client used by the Chroma corpus."""
 
 
 def get_embeddings():
-    """Create the configured OpenAI text-embedding-3 client on demand."""
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is required to build or query the precedent index.")
+    """Create the local HuggingFace embedding client on demand."""
+    from langchain_huggingface import HuggingFaceEmbeddings
 
-    from langchain_openai import OpenAIEmbeddings
-
-    return OpenAIEmbeddings(
-        model=settings.openai_embedding_model,
-        api_key=settings.openai_api_key,
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
     )
+
