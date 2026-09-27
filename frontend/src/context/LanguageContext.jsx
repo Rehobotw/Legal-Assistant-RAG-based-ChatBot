@@ -63,7 +63,10 @@ const translations = {
 
     // Assistant
     assistantLabel: 'FSC Judicial Precedent Retrieval',
-    retrievedLabel: 'Retrieved source records',
+    retrievedLabel: 'Synthesized Legal Opinion & Findings',
+    toggleCitations: 'Show Cited Precedent Sources',
+    hideCitations: 'Hide Cited Precedent Sources',
+    showingCitations: 'Precedent Sources & Gazette Dossiers',
     noResults: 'No source-backed results are available for this inquiry.',
     noCitations: 'No cited cassation decisions were returned.',
     rankedPrecedent: 'Ranked precedent',
@@ -143,7 +146,10 @@ const translations = {
     sendingLabel: 'በማዘጋጀት ላይ…',
 
     assistantLabel: 'የፌ/ጠ/ፍ/ቤት ሰበር ውሳኔ',
-    retrievedLabel: 'የተገኙ ምንጭ መዛግብት',
+    retrievedLabel: 'የተቀናጀ የሕግ ውሳኔ እና ማጠቃለያ',
+    toggleCitations: 'የተጠቀሱ የሰበር ውሳኔ መዛግብትን አሳይ',
+    hideCitations: 'የተጠቀሱ የሰበር ውሳኔ መዛግብትን ደብቅ',
+    showingCitations: 'የተጠቀሱ የምንጭ መዛግብት',
     noResults: 'ለዚህ ጥያቄ ምንም ተዛማጅ ውሳኔ አልተገኘም።',
     noCitations: 'ምንም ጥቅስ ያለው ውሳኔ አልተመለሰም።',
     rankedPrecedent: 'ደረጃ የተሰጠው ውሳኔ',

@@ -18,6 +18,8 @@ const VerifyIcon = () => <Icon><path d="m9 12 2 2 4-5"/><path d="M12 3.5 14.3 5l
 const FolderIcon = () => <Icon><path d="M3 6.5h7l2 2h9v10.5H3z"/></Icon>;
 const MenuIcon = () => <Icon><path d="M4 6h16M4 12h16M4 18h16"/></Icon>;
 const CloseIcon = () => <Icon><path d="M18 6 6 18M6 6l12 12"/></Icon>;
+const ChevronDownIcon = () => <Icon size={16}><path d="m6 9 6 6 6-6"/></Icon>;
+const ChevronUpIcon = () => <Icon size={16}><path d="m18 15-6-6-6 6"/></Icon>;
 
 /* ── Header ───────────────────────────────────────────────────── */
 function Header({ onHome, onToggleSidebar, showSidebarToggle }) {
@@ -398,6 +400,7 @@ function UserMessage({ content }) {
 function AssistantMessage({ content, citations, error }) {
   const { t } = useLanguage();
   const [saved, setSaved] = useState(false);
+  const [showCitations, setShowCitations] = useState(false);
   const now = new Date();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -411,11 +414,43 @@ function AssistantMessage({ content, citations, error }) {
           <p className="request-status error">{error}</p>
         ) : (
           <>
+            {/* Primary Synthesized LLM Answer */}
             <div className="legal-holding">
               <label>{t.retrievedLabel}</label>
-              <p>{content || t.noResults}</p>
+              <div className="synthesized-answer">
+                {content ? (
+                  content.split('\n').map((paragraph, idx) => (
+                    paragraph.trim() && <p key={idx}>{paragraph}</p>
+                  ))
+                ) : (
+                  <p>{t.noResults}</p>
+                )}
+              </div>
             </div>
-            <Citations citations={citations || []} saved={saved} setSaved={setSaved} />
+
+            {/* Collapsible Citations Container */}
+            {citations && citations.length > 0 && (
+              <div className="citations-accordion">
+                <button
+                  type="button"
+                  className="accordion-toggle"
+                  onClick={() => setShowCitations((prev) => !prev)}
+                  aria-expanded={showCitations}
+                >
+                  <span className="accordion-toggle-title">
+                    <BookIcon /> {showCitations ? t.hideCitations : t.toggleCitations} ({citations.length})
+                  </span>
+                  {showCitations ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                </button>
+
+                {showCitations && (
+                  <div className="accordion-content">
+                    <label className="citations-header-label">{t.showingCitations}</label>
+                    <Citations citations={citations} saved={saved} setSaved={setSaved} />
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </article>
