@@ -3,8 +3,11 @@ import app.services.rag.retriever as retriever
 
 
 class FakeStore:
-    def similarity_search_with_relevance_scores(self, _query, k):
-        assert k == 6
+    def similarity_search_with_relevance_scores(self, _query, k, **kwargs):
+        if _query == "gibberish":
+            return [
+                (FakeDocument("unrelated chunk", {"case_number": "99999", "chunk_index": 0}), 0.45),
+            ]
         return [
             (FakeDocument("matching chunk", {"case_number": "130665", "chunk_index": 1}), 0.92),
             (FakeDocument("duplicate", {"case_number": "130665", "chunk_index": 2}), 0.80),
@@ -16,10 +19,12 @@ class FakeStore:
         documents = {
             "130665": ["later case text", "opening case text"],
             "119446": ["whole other case"],
+            "99999": ["unrelated text"],
         }[where["case_number"]]
         metadata = {
             "130665": [{"chunk_index": 1}, {"chunk_index": 0}],
             "119446": [{"chunk_index": 0}],
+            "99999": [{"chunk_index": 0}],
         }[where["case_number"]]
         return {"documents": documents, "metadatas": metadata}
 
@@ -38,3 +43,11 @@ def test_retrieval_deduplicates_cases_and_reconstructs_source_record(monkeypatch
     assert [case.metadata["case_number"] for case in cases] == ["130665", "119446"]
     assert cases[0].content == "opening case text\n\nlater case text"
     assert cases[0].score == 0.92
+
+
+def test_retrieval_filters_low_similarity_scores(monkeypatch) -> None:
+    monkeypatch.setattr(retriever, "get_ready_vector_store", FakeStore)
+
+    cases = retrieve_cases("gibberish", score_threshold=0.7)
+    assert cases == []
+

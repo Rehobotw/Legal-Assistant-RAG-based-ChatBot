@@ -7,7 +7,7 @@ import app.services.rag.pipeline as pipeline
 
 
 def test_chat_returns_ranked_case_citation(monkeypatch) -> None:
-    monkeypatch.setattr(pipeline, "_holding", lambda case, amharic: "የተረጋገጠ የውሳኔ ማጠቃለያ")
+    monkeypatch.setattr(pipeline, "_holding", lambda case, amharic, model=None: "የተረጋገጠ የውሳኔ ማጠቃለያ")
     monkeypatch.setattr(
         pipeline,
         "retrieve_cases",
@@ -41,3 +41,18 @@ def test_chat_rejects_blank_query() -> None:
 
 def test_chat_accepts_short_case_lookup() -> None:
     assert ChatRequest(message="1").message == "1"
+
+
+def test_chat_handles_empty_context_and_greetings(monkeypatch) -> None:
+    monkeypatch.setattr(pipeline, "retrieve_cases", lambda _: [])
+
+    # Test greeting when no documents retrieved
+    greeting_resp = pipeline.answer_query("hello")
+    assert greeting_resp.citations == []
+    assert "Hello" in greeting_resp.answer or "I can only answer" in greeting_resp.answer
+
+    # Test irrelevant query when no documents retrieved
+    irrelevant_resp = pipeline.answer_query("what is the weather today?")
+    assert irrelevant_resp.citations == []
+    assert irrelevant_resp.answer == "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
+

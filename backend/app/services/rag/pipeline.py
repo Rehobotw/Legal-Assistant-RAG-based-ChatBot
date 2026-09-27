@@ -36,27 +36,45 @@ def _extract_decision(content: str) -> str:
     return " ".join(excerpt.split())[:500]
 
 
-def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, model=None) -> str:
-    """Synthesize a single-paragraph, direct legal answer from retrieved case context via LCEL chain."""
+def _format_context(cases: list[RetrievedCase]) -> str:
+    """Group retrieved chunks by document/case number to cleanly present the full legal narrative to the LLM."""
     if not cases:
-        return "ለቀረበው ጥያቄ አግባብነት ያለው የሰበር ውሳኔ አልተገኘም።" if amharic else "No relevant cassation decision precedents were found for this inquiry."
+        return "No context provided."
+
+    grouped: dict[str, list[RetrievedCase]] = {}
+    for c in cases:
+        c_num = c.metadata.get("case_number", "Unknown")
+        grouped.setdefault(c_num, []).append(c)
+
+    formatted_blocks = []
+    for c_num, case_list in grouped.items():
+        vol = case_list[0].metadata.get("volume", "")
+        vol_str = f" ({vol})" if vol else ""
+        header = f"[መዝገብ ቁጥር፦ {c_num}{vol_str}]"
+        combined_text = "\n\n".join(c.content for c in case_list)
+        formatted_blocks.append(f"{header}\n{combined_text}")
+
+    return "\n\n".join(formatted_blocks)
+
+
+def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, model=None) -> str:
+    """Synthesize a direct legal answer from retrieved case context via LCEL chain or handle empty context/greetings."""
+    default_fallback_response = "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
 
     if settings.google_api_key and model is not None:
         try:
             from langchain_core.prompts import ChatPromptTemplate
             from langchain_core.output_parsers import StrOutputParser
 
-            context_blocks = []
-            for c in cases:
-                c_num = c.metadata.get("case_number", "N/A")
-                vol = c.metadata.get("volume", "")
-                context_blocks.append(f"[መዝገብ ቁጥር፦ {c_num} ({vol})]\n{c.content[:2500]}")
+            context_str = _format_context(cases)
 
-            context_str = "\n\n".join(context_blocks)
 
             system_instruction = (
-                "You are an expert Ethiopian legal research assistant specializing in Federal Supreme Court Cassation Division precedents (የፌዴራል ጠቅላይ ፍርድ ቤት ሰበር ሰሚ ችሎት ውሳኔዎች).\n\n"
-                "Your task is to answer the user's query accurately, concisely, and strictly based ON THE PROVIDED CASE CONTEXT.\n\n"
+                "You are an assistant answering questions based strictly on the provided context. "
+                "If the user's query is a standard greeting, respond politely without using context. "
+                "If the provided context is empty or does not contain the answer to the user's query, output EXACTLY: "
+                "'I can only answer questions related to the uploaded documents. Could you please rephrase your question?' "
+                "Do not attempt to guess or use outside knowledge.\n\n"
                 "CRITICAL INSTRUCTIONS:\n"
                 "1. LANGUAGE ALIGNMENT: You MUST respond in the exact same language as the user's query (Amharic or English).\n"
                 "2. STRICT GROUNDING: Rely ONLY on the facts, dates, case numbers, and legal arguments provided in the CONTEXT. Do NOT fabricate information or rely on external knowledge.\n"
@@ -65,10 +83,9 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
                 "   - Explicitly identify and mention key details present in the context: Volume Number, Cassation File Number, Parties involved (Applicant/አመልካች and Respondent/ተጠሪ), specific dates, workplace roles, and applicable Proclamations (e.g., Proclamation No. 377/2003 or አዋጅ ቁጥር 377/96).\n"
                 "   - Summarize the procedural facts and the specific legal error or jurisdictional question submitted to the Cassation Court.\n"
                 "4. TERMINOLOGY: Use standard Ethiopian legal terminology appropriate for the output language (e.g., Material Jurisdiction / የሥረ ነገር ሥልጣን, Fundamental Error of Law / መሠረታዊ የሕግ ስህተት).\n"
-                "5. FALLBACK: If the provided CONTEXT does not contain enough information to answer the specific query:\n"
-                "   - If the query is in Amharic, respond strictly with: \"በተሰጠው የመዝገብ መረጃ ውስጥ ለቀረበው ጥያቄ በቂ መረጃ አልተገኘም።\"\n"
-                "   - If the query is in English, respond strictly with: \"There is insufficient information in the provided case records to answer this query.\""
-                "   -If the context contains multiple different case numbers, YOU MUST IGNORE ALL OF THEM EXCEPT the specific case number requested in the user's query. Answer the question relying ONLY on the facts of the requested case."
+                "5. FALLBACK: If the provided CONTEXT is empty or does not contain the answer to the user's query (and the query is not a standard greeting), output EXACTLY: "
+                "'I can only answer questions related to the uploaded documents. Could you please rephrase your question?'\n"
+                "   - If the context contains multiple different case numbers, YOU MUST IGNORE ALL OF THEM EXCEPT the specific case number requested in the user's query. Answer the question relying ONLY on the facts of the requested case."
             )
 
             prompt_template = ChatPromptTemplate.from_messages([
@@ -82,7 +99,15 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
             if answer_text:
                 return answer_text
         except Exception as e:
-            print(f"LLM chain synthesis failed ({e}), falling back to structured excerpt synthesis.")
+            print(f"LLM chain synthesis failed ({e}), falling back to default handling.")
+
+    # Fallback if model is None or invocation fails
+    if not cases:
+        greetings = {"hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "howdy", "ሰላም", "ሰላምታ", "ጤና ይስጥልኝ"}
+        clean_query = query.strip().lower()
+        if clean_query in greetings:
+            return "ሰላም! እንዴት ልረዳዎት እችላለሁ?" if amharic else "Hello! How can I help you today?"
+        return default_fallback_response
 
     # Clean fallback synthesis if LLM key is missing or calls time out
     if amharic:
@@ -124,7 +149,7 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
                 google_api_key=settings.google_api_key,
                 temperature=0,
                 max_retries=1,
-                timeout=7,
+                timeout=10,
             )
         except Exception:
             model = None
