@@ -14,7 +14,7 @@ const translations = {
     heroDescription:
       'Assisting Federal Judges and legal researchers in searching binding Cassation Division rulings to ensure faster, more consistent judicial outcomes across all jurisdictions.',
     startChat: 'Start Chat →',
-    volumes: 'Volumes 1–25 Indexed',
+    volumes: 'Volumes 15–21 Indexed',
     holdings: 'Over 4,800+ Binding Legal Principles',
     citations: 'Verified Gazette Citations',
 
@@ -57,7 +57,7 @@ const translations = {
     step3: 'Extracting ratio decidendi & binding holdings…',
     step4: 'Synthesizing judicial opinion response…',
     searchLang: 'Search language: English',
-    volumeFilter: 'Volume Filter: All 25',
+    volumeFilter: 'Volume Filter: Volumes 15–21',
     send: 'Send',
     sendingLabel: 'Processing…',
 
@@ -94,12 +94,12 @@ const translations = {
     switchLang: 'Switch to English',
 
     courtChip: 'የኢትዮጵያ ፌዴራል ጠቅላይ ፍርድ ቤት • የሰበር ችሎት',
-    heroTitle: 'አስገዳጅ የሰበር ውሳኔዎችን በቅጽበት ያግኙ',
+    heroTitle: 'የፋዳራሌ ጠቅሊይ ፌ/ቤት ሰበር ችልት ውሣኔዎችን በቅጽበት ያግኙ',
     heroSubtitle: 'Find binding precedent in seconds, not hours',
     heroDescription:
       'ለፌዴራል ዳኞች እና የሕግ ተመራማሪዎች አስገዳጅ የሰበር ውሳኔዎችን በፍጥነት ለማግኘት የተቀናጀ መረጃ ሥርዓት።',
     startChat: 'ውይይት ይጀምሩ →',
-    volumes: 'ቅጽ 1–25 ተደራጅተዋል',
+    volumes: 'ቅጽ 15–21 ተደራጅተዋል',
     holdings: 'ከ4,800 በላይ አስገዳጅ የሕግ መርሆዎች',
     citations: 'የተረጋገጡ የጋዜጣ ጥቅሶች',
 
@@ -141,7 +141,7 @@ const translations = {
     step3: 'አስገዳጅ የሕግ ትርጉሞች (ratio decidendi) በመለየት ላይ…',
     step4: 'የዳኝነት ሕጋዊ ምላሽ በማዘጋጀት ላይ…',
     searchLang: 'የፍለጋ ቋንቋ፦ አማርኛ',
-    volumeFilter: 'ቅጽ ማጣሪያ፦ ሁሉም 25',
+    volumeFilter: 'ቅጽ ማጣሪያ፦ ቅጽ 15–21',
     send: 'ላክ',
     sendingLabel: 'በማዘጋጀት ላይ…',
 

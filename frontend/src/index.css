@@ -382,29 +382,56 @@ button { cursor: pointer; }
   font-weight: 700;
 }
 .history-group:first-child > label { color: var(--accent); }
-.history-group button {
-  border: 0;
-  background: transparent;
-  width: 100%;
-  padding: 10px;
-  text-align: left;
+.history-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
   border-radius: 8px;
   margin: 1px 0;
   color: var(--text-primary);
+  cursor: pointer;
   transition: background 0.15s;
 }
-.history-group button:hover { background: var(--bg-elevated); }
-.history-group button.selected {
+.history-item:hover {
+  background: var(--bg-elevated);
+}
+.history-item.selected {
   background: var(--bg-elevated);
   border-left: 3px solid var(--accent);
 }
-.history-group button strong {
+.history-item strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
   line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+.delete-session-btn {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  line-height: 0;
+  flex-shrink: 0;
+  margin-left: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.history-item:hover .delete-session-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.delete-session-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
 }
 .no-history {
   text-align: center;

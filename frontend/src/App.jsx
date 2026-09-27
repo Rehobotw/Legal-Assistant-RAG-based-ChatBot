@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { sendChatMessage, fetchChatHistory, fetchSessionDetail } from './services/chatApi';
+import { sendChatMessage, fetchChatHistory, fetchSessionDetail, deleteSessionApi } from './services/chatApi';
 import './index.css';
 
 /* ── Inline SVG Icons ─────────────────────────────────────────── */
@@ -20,6 +20,7 @@ const MenuIcon = () => <Icon><path d="M4 6h16M4 12h16M4 18h16"/></Icon>;
 const CloseIcon = () => <Icon><path d="M18 6 6 18M6 6l12 12"/></Icon>;
 const ChevronDownIcon = () => <Icon size={16}><path d="m6 9 6 6 6-6"/></Icon>;
 const ChevronUpIcon = () => <Icon size={16}><path d="m18 15-6-6-6 6"/></Icon>;
+const TrashIcon = ({ size = 15 }) => <Icon size={size}><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></Icon>;
 
 /* ── Header ───────────────────────────────────────────────────── */
 function Header({ onHome, onToggleSidebar, showSidebarToggle }) {
@@ -108,7 +109,7 @@ const Pillar = ({ number, icon, title, text, foot }) => (
 );
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
-function Sidebar({ history, activeSessionId, onSelectSession, onNew, open, onClose }) {
+function Sidebar({ history, activeSessionId, onSelectSession, onDeleteSession, onNew, open, onClose }) {
   const { t } = useLanguage();
   const [search, setSearch] = useState('');
 
@@ -148,11 +149,19 @@ function Sidebar({ history, activeSessionId, onSelectSession, onNew, open, onClo
             <div className="history-group" key={group.label}>
               <label>{group.label}</label>
               {group.items.map((item) => (
-                <button key={item.id}
-                  className={activeSessionId === item.id ? 'selected' : ''}
+                <div key={item.id}
+                  className={`history-item ${activeSessionId === item.id ? 'selected' : ''}`}
                   onClick={() => { onSelectSession(item.id); onClose(); }}>
-                  <strong>{item.title}</strong>
-                </button>
+                  <strong title={item.title}>{item.title}</strong>
+                  <button className="delete-session-btn" type="button"
+                    title="Delete inquiry" aria-label="Delete inquiry"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession?.(item.id);
+                    }}>
+                    <TrashIcon />
+                  </button>
+                </div>
               ))}
             </div>
           ))}
@@ -242,6 +251,21 @@ function ChatView({ onNew }) {
       setLoading(false);
     }
   }, []);
+
+  // Handle deleting a session
+  const handleDeleteSession = useCallback(async (id) => {
+    if (!id) return;
+    const ok = await deleteSessionApi(id);
+    if (ok) {
+      if (activeSessionId === id) {
+        setMessages([]);
+        setQuestion('');
+        setSessionId(null);
+        setActiveSessionId(null);
+      }
+      refreshHistory();
+    }
+  }, [activeSessionId, refreshHistory]);
 
   // Cycle process steps while loading
   useEffect(() => {
@@ -339,8 +363,8 @@ function ChatView({ onNew }) {
   return (
     <main className="chat-workspace">
       <Sidebar history={history} activeSessionId={activeSessionId}
-        onSelectSession={handleSelectSession} onNew={handleNewInquiry}
-        open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession}
+        onNew={handleNewInquiry} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
 
       <section className="chat-area">
@@ -349,7 +373,7 @@ function ChatView({ onNew }) {
           <div className="integrity">
             <span><ScaleIcon /></span>
             <div>
-              <h2>{t.integrityTitle} <b>{t.integrityTag}</b></h2>
+              <h2>{t.integrityTitle}</h2>
               <p>{t.integrityDesc}</p>
             </div>
           </div>
@@ -382,7 +406,6 @@ function ChatView({ onNew }) {
         <form className="dock" onSubmit={ask}>
           <div className="dock-box">
             <div className="dock-input">
-              <SearchIcon />
               <textarea ref={inputRef} value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 placeholder={t.composerPlaceholder}
@@ -426,10 +449,28 @@ function UserMessage({ content }) {
   );
 }
 
+function renderFormattedText(text) {
+  if (!text) return null;
+  return text.split('\n').map((paragraph, idx) => {
+    if (!paragraph.trim()) return null;
+    const parts = paragraph.split(/(\*\*.*?\*\*)/g);
+    return (
+      <p key={idx}>
+        {parts.map((part, pIdx) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={pIdx}>{part.slice(2, -2)}</strong>;
+          }
+          return part;
+        })}
+      </p>
+    );
+  });
+}
+
 function AssistantMessage({ content, citations, error }) {
   const { t } = useLanguage();
   const [saved, setSaved] = useState(false);
-  const [showCitations, setShowCitations] = useState(false);
+  const [showCitations, setShowCitations] = useState(true);
   const now = new Date();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -447,13 +488,7 @@ function AssistantMessage({ content, citations, error }) {
             <div className="legal-holding">
               <label>{t.retrievedLabel}</label>
               <div className="synthesized-answer">
-                {content ? (
-                  content.split('\n').map((paragraph, idx) => (
-                    paragraph.trim() && <p key={idx}>{paragraph}</p>
-                  ))
-                ) : (
-                  <p>{t.noResults}</p>
-                )}
+                {content ? renderFormattedText(content) : <p>{t.noResults}</p>}
               </div>
             </div>
 

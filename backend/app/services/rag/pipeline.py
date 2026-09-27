@@ -28,10 +28,59 @@ def _is_context_sufficient(cases: list[RetrievedCase]) -> bool:
 
 
 
+def _strip_procedural_noise(text: str) -> str:
+    """
+    Strip raw text verbatim noise, signature notes, page markers, scanner artifacts,
+    and layout metadata to focus the LLM on substantive legal content.
+    
+    Removes:
+    - Chunk headers like [መዝገብ ቁጥር: 130665 | Volume: Volume 21 | Chunk: 1/5]
+    - Page markers (--- PAGE 6 ---)
+    - Signature blocks (የማይነበብ የአምስት ዳኞች ፊርማ አለበት)
+    - Scanner noise and repeated separators
+    """
+    if not text:
+        return ""
+    
+    # Remove chunk headers
+    text = re.sub(r"\[መዝገብ ቁጥር:[^\]]+\]", "", text)
+    text = re.sub(r"\[Case No\.[^\]]+\]", "", text, flags=re.IGNORECASE)
+    
+    # Remove PAGE markers - all variations
+    text = re.sub(r"---+\s*PAGE\s+\d+\s*---+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"PAGE\s+\d+(?:\s+\([^)]+\))?", "", text, flags=re.IGNORECASE)  # "PAGE 6 (Content Page)"
+    text = re.sub(r"ገጽ\s*[:፡]?\s*\d+", "", text)
+    
+    # Remove signature noise variations
+    text = re.sub(r"የማይነበብ(?:\s*የ[^\n]+)?\s*ፊርማ(?:\s*አለበት)?", "", text)
+    text = re.sub(r"የዳኞች\s*ፊርማ\s*", "", text)
+    text = re.sub(r"የ\s*\d+\s*ዳኞች\s*ፊርማ\s*አለበት", "", text)
+    text = re.sub(r"unreadable\s*signature", "", text, flags=re.IGNORECASE)
+    
+    # Remove repeated dashes, underscores, equals signs
+    text = re.sub(r"[-_=]{3,}", "", text)
+    
+    # Remove common OCR artifacts
+    text = re.sub(r"\s*\[OCR\s*Error\][^\n]*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*\[Illegible\][^\n]*", "", text, flags=re.IGNORECASE)
+    
+    # Remove isolated punctuation lines
+    text = re.sub(r"^\s*[፡።፣፤፥፦፧፨]+\s*$", "", text, flags=re.MULTILINE)
+    
+    # Normalize whitespace - preserve paragraph structure
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    
+    # Remove very short noise lines (less than 5 characters)
+    lines = [line for line in lines if len(line) >= 5]
+    
+    return "\n".join(lines)
+
+
 def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
     """Summarize legal holding with strict length and timeout, falling back gracefully."""
+    cleaned_content = _strip_procedural_noise(case.content)
     if not settings.google_api_key or model is None:
-        return _extract_decision(case.content)
+        return _extract_decision(cleaned_content)
 
     try:
         instruction = (
@@ -39,24 +88,41 @@ def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
             if amharic
             else "Using only the supplied decision, summarize its holding in two short sentences."
         )
-        decision_index = case.content.rfind("ውሳኔ")
-        source_excerpt = case.content[decision_index:] if decision_index >= 0 else case.content
+        decision_index = cleaned_content.rfind("ውሳኔ")
+        source_excerpt = cleaned_content[decision_index:] if decision_index >= 0 else cleaned_content
         response = model.invoke(f"{instruction}\n\nCASE RECORD:\n{source_excerpt[:2500]}")
         return str(response.content).strip()
     except Exception as e:
         print(f"Gemini API invocation failed/timed out ({e}), using direct extraction fallback.")
-        return _extract_decision(case.content)
+        return _extract_decision(cleaned_content)
 
 
 def _extract_decision(content: str) -> str:
     """A transparent, source-only fallback when Gemini is slow, unavailable, or rate limited."""
-    decision_index = content.rfind("ውሳኔ")
-    excerpt = content[decision_index:] if decision_index >= 0 else content
-    return " ".join(excerpt.split())[:500]
+    cleaned = _strip_procedural_noise(content)
+    
+    # Find the decision section
+    decision_index = cleaned.rfind("ውሳኔ")
+    if decision_index >= 0:
+        excerpt = cleaned[decision_index:]
+    else:
+        # Try to find any meaningful content
+        excerpt = cleaned
+    
+    # Further clean the excerpt
+    excerpt = excerpt.replace("ውሳኔ", "").strip()
+    
+    # Remove common noise patterns that might remain
+    excerpt = re.sub(r"(?:PAGE|ገጽ)\s*\d+", "", excerpt, flags=re.IGNORECASE)
+    excerpt = re.sub(r"\([^)]*Content\s*Page[^)]*\)", "", excerpt, flags=re.IGNORECASE)
+    
+    # Join and limit
+    words = excerpt.split()
+    return " ".join(words)[:500].strip()
 
 
 def _format_context(cases: list[RetrievedCase]) -> str:
-    """Group retrieved chunks by document/case number to cleanly present the full legal narrative to the LLM."""
+    """Group retrieved chunks by document/case number, strip procedural noise, and format context for LLM."""
     if not cases:
         return "No context provided."
 
@@ -70,14 +136,23 @@ def _format_context(cases: list[RetrievedCase]) -> str:
         vol = case_list[0].metadata.get("volume", "")
         vol_str = f" ({vol})" if vol else ""
         header = f"[መዝገብ ቁጥር፦ {c_num}{vol_str}]"
-        combined_text = "\n\n".join(c.content for c in case_list)
+        sanitized_texts = [_strip_procedural_noise(c.content) for c in case_list]
+        combined_text = "\n\n".join(t for t in sanitized_texts if t)
         formatted_blocks.append(f"{header}\n{combined_text}")
 
     return "\n\n".join(formatted_blocks)
 
 
 def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, model=None) -> str:
-    """Synthesize a direct legal answer from retrieved case context via LCEL chain or handle empty context/greetings."""
+    """
+    Synthesize a comprehensive legal answer from retrieved case context.
+    
+    Uses multi-chunk legal synthesis approach that extracts:
+    - Case background and dispute
+    - Lower court (First Instance Court) findings and legal basis
+    - Cassation Division legal interpretation and holding
+    - Relevant statutes, proclamations, and financial figures
+    """
     default_fallback_response = "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
 
     if settings.google_api_key and model is not None:
@@ -86,56 +161,149 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
             from langchain_core.output_parsers import StrOutputParser
 
             context_str = _format_context(cases)
+            
+            # Debug: Check if context is meaningful
+            if not context_str or len(context_str.strip()) < 50:
+                print(f"⚠️  Warning: Context is too short ({len(context_str)} chars). Falling back to extraction.")
+                # Fall through to fallback
+            else:
+                system_instruction = (
+                    "You are an expert Ethiopian Federal Supreme Court Cassation Division legal analyst. "
+                    "Your objective is to read the full context of a legal decision across all pages and write a comprehensive, "
+                    "logically structured Amharic legal summary.\n\n"
+                    
+                    "## SYNTHESIS REQUIREMENTS:\n\n"
+                    
+                    "1. **NEVER output raw text quotes, signature blocks, or isolated judgment snippets as your main answer.**\n\n"
+                    
+                    "2. **Carefully analyze the text across all pages to extract:**\n"
+                    "   * The original dispute (e.g., illegal termination, property damage, contract breach)\n"
+                    "   * The decision of the **First Instance Court** (የፌዴራል የመጀመሪያ ደረጃ ፍርድ ቤት ውሳኔ) including:\n"
+                    "     - Relevant legal proclamations cited (e.g., አዋጅ ቁጥር 377/96, አዋጅ ቁጥር 1156/2011)\n"
+                    "     - Statute of limitations considerations (ይርጋ)\n"
+                    "     - Monetary compensation awards (exact figures in Birr)\n"
+                    "     - Legal reasoning and findings of fact\n"
+                    "   * The position of the **High Court or Appellate Court** (if applicable)\n"
+                    "   * The **Cassation Division's legal interpretation and final holding** (የሰበር ችሎት ውሳኔ)\n\n"
+                    
+                    "3. **Structure your response using clean, bolded sections:**\n"
+                    "   * **የክርክሩ መነሻ ፍሬ ነገር (Case Background & Dispute)**\n"
+                    "   * **የስር ፍርድ ቤት ውሳኔ (Lower Court Decision & Compensation)**\n"
+                    "     - Include proclamation numbers, legal basis, and exact monetary amounts\n"
+                    "   * **የከፍተኛ ፍርድ ቤት አቋም (High Court Position)** — if applicable\n"
+                    "   * **የሰበር ችሎት የህግ ትርጉም እና ውሳኔ (Cassation Court Legal Interpretation & Holding)**\n\n"
+                    
+                    "4. **For each section, synthesize the information logically:**\n"
+                    "   * DO NOT simply copy verbatim chunks\n"
+                    "   * Extract key facts, legal principles, and holdings\n"
+                    "   * Include specific references to labor proclamations, civil code articles, or other statutes\n"
+                    "   * Preserve exact financial figures and dates\n"
+                    "   * Maintain the chronological flow: Background → First Instance → Appellate → Cassation\n\n"
+                    
+                    "5. **If the retrieved chunks lack substantive details** regarding the facts or arguments, "
+                    "explicitly inform the user that the file context in the database only contains the final procedural order "
+                    "and lacks the detailed background facts.\n\n"
+                    
+                    "6. **Always state the source details clearly at the end:**\n"
+                    "   * Case File Number (መዝገብ ቁጥር)\n"
+                    "   * Volume (ቅጽ)\n"
+                    "   * Page Range (ገጾች)\n"
+                    "   * Court (Federal Supreme Court Cassation Division)\n\n"
+                    
+                    "7. **If the provided context is empty or does not contain the answer to the user's query** "
+                    "(and the query is not a standard greeting), respond that you can only answer questions related to the uploaded documents.\n\n"
+                    
+                    "## FORMATTING RULES:\n"
+                    "* Use clear Amharic legal terminology\n"
+                    "* Bold section headers for readability\n"
+                    "* Write in paragraph form, not bullet points (except for source citations)\n"
+                    "* Maintain professional legal writing tone\n"
+                    "* Ensure accuracy in citing proclamation numbers and amounts\n"
+                )
 
-            system_instruction = (
-                "You are an assistant answering questions based strictly on the provided context. "
-                "If the user's query is a standard greeting, respond politely without using context. "
-                "If the provided context is empty or does not contain the answer to the user's query, output EXACTLY: "
-                "'I can only answer questions related to the uploaded documents. Could you please rephrase your question?' "
-                "Do not attempt to guess or use outside knowledge.\n\n"
-                "CRITICAL INSTRUCTIONS:\n"
-                "1. LANGUAGE ALIGNMENT: You MUST respond in the exact same language as the user's query (Amharic or English).\n"
-                "2. STRICT GROUNDING: Rely ONLY on the facts, dates, case numbers, and legal arguments provided in the CONTEXT. Do NOT fabricate information or rely on external knowledge.\n"
-                "3. LEGAL SYNTHESIS & STRUCTURE:\n"
-                "   - State the core legal dispute clearly.\n"
-                "   - Explicitly identify and mention key details present in the context: Volume Number, Cassation File Number, Parties involved (Applicant/አመልካች and Respondent/ተጠሪ), specific dates, workplace roles, and applicable Proclamations (e.g., Proclamation No. 377/2003 or አዋጅ ቁጥር 377/96).\n"
-                "   - Summarize the procedural facts and the specific legal error or jurisdictional question submitted to the Cassation Court in chronological order (Facts -> Legal Issue -> Arguments -> Court Reasoning -> Ruling).\n"
-                "4. TERMINOLOGY: Use standard Ethiopian legal terminology appropriate for the output language (e.g., Material Jurisdiction / የሥረ ነገር ሥልጣን, Fundamental Error of Law / መሠረታዊ የሕግ ስህተት).\n"
-                "5. FALLBACK: If the provided CONTEXT is empty or does not contain the answer to the user's query (and the query is not a standard greeting), output EXACTLY: "
-                "'I can only answer questions related to the uploaded documents. Could you please rephrase your question?'\n"
-                "   - If the context contains multiple different case numbers, YOU MUST IGNORE ALL OF THEM EXCEPT the specific case number requested in the user's query. Answer the question relying ONLY on the facts of the requested case."
-            )
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", system_instruction),
+                    ("user", "Context Provided:\n{formatted_context}\n\nUser Question: {user_query}"),
+                ])
 
-            prompt_template = ChatPromptTemplate.from_messages([
-                ("system", system_instruction),
-                ("user", "CONTEXT:\n{context}\n\nQUESTION:\n{question}"),
-            ])
-
-            chain = prompt_template | model | StrOutputParser()
-            result = chain.invoke({"context": context_str, "question": query})
-            answer_text = str(result).strip()
-            if answer_text:
-                return answer_text
+                chain = prompt_template | model | StrOutputParser()
+                result = chain.invoke({"formatted_context": context_str, "user_query": query})
+                answer_text = str(result).strip()
+                if answer_text and len(answer_text) > 50:  # Ensure we got a real response
+                    return answer_text
+                else:
+                    print(f"⚠️  Warning: LLM returned short response ({len(answer_text)} chars)")
         except Exception as e:
-            print(f"LLM chain synthesis failed ({e}), falling back to default handling.")
+            print(f"⚠️  LLM chain synthesis failed ({e}), falling back to default handling.")
 
+    # Enhanced fallback synthesis if LLM key is missing or calls time out
     if not cases:
         return default_fallback_response
 
-    # Clean fallback synthesis if LLM key is missing or calls time out
+    # Check if we have meaningful content
+    total_content = sum(len(c.content.strip()) for c in cases)
+    if total_content < 100:
+        return (
+            "⚠️ የተገኘው መረጃ በጣም አጭር ነው። ይህ የመዝገብ ቁጥር ምናልባት የመጨረሻውን ውሳኔ ገጽ ብቻ ሊኖረው ይችላል። "
+            "ለተሟላ መረጃ ሌሎች ገጾችን ያስፈልጋል።" if amharic else
+            "⚠️ The retrieved information is very limited. This case file may only contain the final decision page "
+            "in the database. Additional pages would be needed for complete context."
+        )
+    
     if amharic:
         summary_lines = []
+        source_bullets = []
         for c in cases:
             c_num = c.metadata.get("case_number", "N/A")
             vol = c.metadata.get("volume", "")
-            summary_lines.append(f"በቅጽ {vol}፣ መዝገብ ቁጥር {c_num} የተመዘገበው የክርክሩ ዋና ጉዳይ፦ {_extract_decision(c.content)[:350]}")
-        return " ".join(summary_lines)
+            start_page = c.metadata.get("start_page", c.metadata.get("page_number", c.metadata.get("page", "N/A")))
+            end_page = c.metadata.get("end_page", start_page)
+            court = c.metadata.get("court", "የፌዴራል ጠቅላይ ፍርድ ቤት ሰበር ችሎት")
+            
+            page_range = f"{start_page}-{end_page}" if start_page != end_page else str(start_page)
+            
+            # Get cleaned decision text
+            decision_text = _extract_decision(c.content)
+            if decision_text:
+                summary_lines.append(
+                    f"**መዝገብ ቁጥር {c_num}፦** {decision_text}"
+                )
+            source_bullets.append(
+                f"• መዝገብ ቁጥር፦ {c_num} (ቅጽ፦ {vol if vol else 'N/A'}, ገጾች፦ {page_range}) — {court}"
+            )
+        sources_section = "\n\n**ምንጮች፦**\n" + "\n".join(source_bullets)
+        
+        if summary_lines:
+            return "\n\n".join(summary_lines) + sources_section
+        else:
+            return "የተገኘው መረጃ በቂ አይደለም።" + sources_section
     else:
         summary_lines = []
+        source_bullets = []
         for c in cases:
             c_num = c.metadata.get("case_number", "N/A")
-            summary_lines.append(f"For Cassation Case No. {c_num}: {_extract_decision(c.content)[:350]}")
-        return " ".join(summary_lines)
+            vol = c.metadata.get("volume", "")
+            start_page = c.metadata.get("start_page", c.metadata.get("page_number", c.metadata.get("page", "N/A")))
+            end_page = c.metadata.get("end_page", start_page)
+            court = c.metadata.get("court", "Federal Supreme Court Cassation Division")
+            
+            page_range = f"{start_page}-{end_page}" if start_page != end_page else str(start_page)
+            
+            # Get cleaned decision text
+            decision_text = _extract_decision(c.content)
+            if decision_text:
+                summary_lines.append(
+                    f"**Case No. {c_num}:** {decision_text}"
+                )
+            source_bullets.append(
+                f"• Case File No: {c_num} (Volume: {vol if vol else 'N/A'}, Pages: {page_range}) — {court}"
+            )
+        sources_section = "\n\n**Sources:**\n" + "\n".join(source_bullets)
+        
+        if summary_lines:
+            return "\n\n".join(summary_lines) + sources_section
+        else:
+            return "Insufficient information retrieved." + sources_section
 
 
 def answer_query(message: str, language: str = "auto") -> ChatResponse:
@@ -191,19 +359,39 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
 
     synthesized_answer = _synthesize_answer(normalized, cases, amharic, model=model)
 
-    citations = [
-        Citation(
-            file_number=case.metadata.get("case_number", ""),
-            date=case.metadata.get("date", ""),
-            court=case.metadata.get("court", "Federal Supreme Court Cassation Division"),
+    citations = []
+    for rank, case in enumerate(cases, start=1):
+        start_page = case.metadata.get("start_page", case.metadata.get("page_number", case.metadata.get("page", "")))
+        end_page = case.metadata.get("end_page", start_page)
+        
+        # Format page range display
+        if start_page and end_page and str(start_page) != str(end_page):
+            page_display = f"Pages {start_page}-{end_page}"
+        elif start_page:
+            page_display = f"Page {start_page}"
+        else:
+            page_display = ""
+        
+        citation = Citation(
+            case_number=str(case.metadata.get("case_number", "")),
+            file_number=str(case.metadata.get("case_number", "")),
+            volume=str(case.metadata.get("volume", "")),
+            page_number=str(start_page),
+            page=str(start_page),
+            start_page=str(start_page),
+            end_page=str(end_page),
+            similarity_score=round(case.score, 4),
+            score=round(case.score, 4),
+            match_type=getattr(case, "match_type", "semantic"),
+            source_filename=str(case.metadata.get("source_filename", case.metadata.get("source_file", ""))),
+            source_file=str(case.metadata.get("source_file", case.metadata.get("source_filename", ""))),
+            date=str(case.metadata.get("date", "")),
+            court=str(case.metadata.get("court", "Federal Supreme Court Cassation Division")),
             holding=_holding(case, amharic, model=model),
             rank=rank,
-            score=round(case.score, 4),
-            volume=case.metadata.get("volume", ""),
-            page=case.metadata.get("page", ""),
+            bench=page_display,
         )
-        for rank, case in enumerate(cases, start=1)
-    ]
+        citations.append(citation)
 
     return ChatResponse(
         query=normalized,
@@ -211,4 +399,5 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
         citations=citations,
         disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
     )
+
 
