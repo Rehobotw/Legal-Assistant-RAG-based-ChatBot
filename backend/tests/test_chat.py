@@ -7,6 +7,7 @@ import app.services.rag.pipeline as pipeline
 
 
 def test_chat_returns_ranked_case_citation(monkeypatch) -> None:
+    monkeypatch.setattr(pipeline, "get_llm_model", lambda: None)
     monkeypatch.setattr(pipeline, "_holding", lambda case, amharic, model=None: "የተረጋገጠ የውሳኔ ማጠቃለያ")
     monkeypatch.setattr(
         pipeline,
@@ -32,6 +33,16 @@ def test_chat_returns_ranked_case_citation(monkeypatch) -> None:
     assert response.citations[0].file_number == "130665"
     assert response.citations[0].rank == 1
     assert response.citations[0].holding
+
+
+def test_chat_handles_quota_exceeded_error(monkeypatch) -> None:
+    def _raise_quota(_):
+        raise Exception("insufficient_quota 429 credit_balance_exhausted")
+    monkeypatch.setattr(pipeline, "retrieve_cases", _raise_quota)
+
+    resp = pipeline.answer_query("termination notice")
+    assert "out of API credits" in resp.answer
+    assert resp.citations == []
 
 
 def test_chat_rejects_blank_query() -> None:

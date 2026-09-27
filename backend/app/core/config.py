@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     openai_api_key: str | None = None
     google_api_key: str | None = None
+    nvidia_api_key: str | None = None
+    llm_provider: str = "auto"  # "nvidia", "gemini", "openai", or "auto"
+    nvidia_model: str = "meta/llama-3.1-70b-instruct"
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     openai_embedding_model: str = "text-embedding-3-small"
     gemini_model: str = "gemini-2.5-flash"
     rag_data_dir: str = str(BACKEND_DIR / "data/raw")

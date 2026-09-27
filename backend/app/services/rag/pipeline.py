@@ -5,6 +5,29 @@ from app.schemas.chat import ChatResponse, Citation
 from app.services.rag.retriever import RetrievedCase, retrieve_cases
 
 
+class QuotaExceededError(RuntimeError):
+    """Raised when an LLM or Embedding API quota / credit balance is exhausted."""
+
+
+def is_quota_error(e: Exception) -> bool:
+    """Check if an exception is caused by API credit balance exhaustion or rate limit / quota limits."""
+    err_str = str(e).lower()
+    quota_keywords = [
+        "resource_exhausted",
+        "resourceexhausted",
+        "insufficient_quota",
+        "credit_balance_exhausted",
+        "quota exceeded",
+        "you exceeded your current quota",
+        "you have no credits remaining",
+        "rate_limit_exceeded",
+        "ratelimiterror",
+        "googleratelimiterror",
+        "429",
+    ]
+    return any(keyword in err_str for keyword in quota_keywords)
+
+
 def _is_amharic(message: str, language: str) -> bool:
     return language == "am" or (language == "auto" and any("\u1200" <= char <= "\u137f" for char in message))
 
@@ -70,16 +93,72 @@ def _strip_procedural_noise(text: str) -> str:
     # Normalize whitespace - preserve paragraph structure
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     
-    # Remove very short noise lines (less than 5 characters)
-    lines = [line for line in lines if len(line) >= 5]
+    # Remove very short noise lines (less than 2 characters)
+    lines = [line for line in lines if len(line) >= 2]
     
     return "\n".join(lines)
+
+
+def get_llm_model():
+    """Instantiate the LLM model based on provider settings (NVIDIA, Gemini, OpenAI)."""
+    provider = (settings.llm_provider or "auto").lower()
+
+    # 1. NVIDIA API Key (OpenAI-compatible)
+    if (provider in ("nvidia", "auto")) and settings.nvidia_api_key:
+        try:
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=settings.nvidia_model,
+                api_key=settings.nvidia_api_key,
+                base_url=settings.nvidia_base_url,
+                temperature=0,
+                max_retries=1,
+                timeout=15,
+            )
+        except Exception as e:
+            if is_quota_error(e):
+                raise QuotaExceededError("NVIDIA API quota / credit error.") from e
+            print(f"Failed to initialize NVIDIA LLM: {e}")
+
+    # 2. Google Gemini API
+    if (provider in ("gemini", "auto")) and settings.google_api_key:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model=settings.gemini_model,
+                google_api_key=settings.google_api_key,
+                temperature=0,
+                max_retries=1,
+                timeout=10,
+            )
+        except Exception as e:
+            if is_quota_error(e):
+                raise QuotaExceededError("Google Gemini API quota / credit error.") from e
+            print(f"Failed to initialize Gemini LLM: {e}")
+
+    # 3. OpenAI API
+    if (provider in ("openai", "auto")) and settings.openai_api_key:
+        try:
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model="gpt-4o-mini",
+                api_key=settings.openai_api_key,
+                temperature=0,
+                max_retries=1,
+                timeout=10,
+            )
+        except Exception as e:
+            if is_quota_error(e):
+                raise QuotaExceededError("OpenAI API quota / credit error.") from e
+            print(f"Failed to initialize OpenAI LLM: {e}")
+
+    return None
 
 
 def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
     """Summarize legal holding with strict length and timeout, falling back gracefully."""
     cleaned_content = _strip_procedural_noise(case.content)
-    if not settings.google_api_key or model is None:
+    if model is None:
         return _extract_decision(cleaned_content)
 
     try:
@@ -93,6 +172,8 @@ def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
         response = model.invoke(f"{instruction}\n\nCASE RECORD:\n{source_excerpt[:2500]}")
         return str(response.content).strip()
     except Exception as e:
+        if is_quota_error(e):
+            raise QuotaExceededError("You are out of API credits or quota has been exceeded.") from e
         print(f"Gemini API invocation failed/timed out ({e}), using direct extraction fallback.")
         return _extract_decision(cleaned_content)
 
@@ -101,16 +182,15 @@ def _extract_decision(content: str) -> str:
     """A transparent, source-only fallback when Gemini is slow, unavailable, or rate limited."""
     cleaned = _strip_procedural_noise(content)
     
-    # Find the decision section
-    decision_index = cleaned.rfind("ውሳኔ")
+    # Find the decision section (first occurrence of ውሳኔ heading)
+    decision_index = cleaned.find("ውሳኔ")
     if decision_index >= 0:
         excerpt = cleaned[decision_index:]
     else:
-        # Try to find any meaningful content
         excerpt = cleaned
     
-    # Further clean the excerpt
-    excerpt = excerpt.replace("ውሳኔ", "").strip()
+    # Remove leading heading 'ውሳኔ' if present at start
+    excerpt = re.sub(r"^\s*ውሳኔ\s*[:፡]?\s*", "", excerpt)
     
     # Remove common noise patterns that might remain
     excerpt = re.sub(r"(?:PAGE|ገጽ)\s*\d+", "", excerpt, flags=re.IGNORECASE)
@@ -144,18 +224,9 @@ def _format_context(cases: list[RetrievedCase]) -> str:
 
 
 def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, model=None) -> str:
-    """
-    Synthesize a comprehensive legal answer from retrieved case context.
-    
-    Uses multi-chunk legal synthesis approach that extracts:
-    - Case background and dispute
-    - Lower court (First Instance Court) findings and legal basis
-    - Cassation Division legal interpretation and holding
-    - Relevant statutes, proclamations, and financial figures
-    """
     default_fallback_response = "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
 
-    if settings.google_api_key and model is not None:
+    if model is not None:
         try:
             from langchain_core.prompts import ChatPromptTemplate
             from langchain_core.output_parsers import StrOutputParser
@@ -234,6 +305,8 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
                 else:
                     print(f"⚠️  Warning: LLM returned short response ({len(answer_text)} chars)")
         except Exception as e:
+            if is_quota_error(e):
+                raise QuotaExceededError("You are out of API credits or quota has been exceeded.") from e
             print(f"⚠️  LLM chain synthesis failed ({e}), falling back to default handling.")
 
     # Enhanced fallback synthesis if LLM key is missing or calls time out
@@ -323,7 +396,19 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
     # 2. Retrieve cases from Vector Store
     try:
         cases = retrieve_cases(normalized)
-    except (ImportError, RuntimeError) as error:
+    except Exception as error:
+        if is_quota_error(error):
+            quota_msg = (
+                "⚠️ የኤፒአይ ክሬዲት አልቋል (ወይም ኮታ ተሟጧል)። እባክዎን የብድር ሂሳብዎን (OpenAI / Google) ያረጋግጡ።"
+                if amharic else
+                "⚠️ You are out of API credits (or your quota limit has been exceeded). Please check your OpenAI / Google API billing or quota to continue."
+            )
+            return ChatResponse(
+                query=normalized,
+                answer=quota_msg,
+                citations=[],
+                disclaimer="API Quota / Credit Exhausted.",
+            )
         return ChatResponse(
             query=normalized,
             answer=("የውሳኔ መረጃ ጠቋሚው ገና አልተዘጋጀም።" if amharic else "The precedent index is not ready yet."),
@@ -341,63 +426,79 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
             disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
         )
 
-    # Instantiate model once for the request if API key is present
-    model = None
-    if settings.google_api_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-
-            model = ChatGoogleGenerativeAI(
-                model=settings.gemini_model,
-                google_api_key=settings.google_api_key,
-                temperature=0,
-                max_retries=1,
-                timeout=10,
-            )
-        except Exception:
-            model = None
-
-    synthesized_answer = _synthesize_answer(normalized, cases, amharic, model=model)
-
-    citations = []
-    for rank, case in enumerate(cases, start=1):
-        start_page = case.metadata.get("start_page", case.metadata.get("page_number", case.metadata.get("page", "")))
-        end_page = case.metadata.get("end_page", start_page)
-        
-        # Format page range display
-        if start_page and end_page and str(start_page) != str(end_page):
-            page_display = f"Pages {start_page}-{end_page}"
-        elif start_page:
-            page_display = f"Page {start_page}"
-        else:
-            page_display = ""
-        
-        citation = Citation(
-            case_number=str(case.metadata.get("case_number", "")),
-            file_number=str(case.metadata.get("case_number", "")),
-            volume=str(case.metadata.get("volume", "")),
-            page_number=str(start_page),
-            page=str(start_page),
-            start_page=str(start_page),
-            end_page=str(end_page),
-            similarity_score=round(case.score, 4),
-            score=round(case.score, 4),
-            match_type=getattr(case, "match_type", "semantic"),
-            source_filename=str(case.metadata.get("source_filename", case.metadata.get("source_file", ""))),
-            source_file=str(case.metadata.get("source_file", case.metadata.get("source_filename", ""))),
-            date=str(case.metadata.get("date", "")),
-            court=str(case.metadata.get("court", "Federal Supreme Court Cassation Division")),
-            holding=_holding(case, amharic, model=model),
-            rank=rank,
-            bench=page_display,
+    # Instantiate model using configured provider (NVIDIA, Gemini, OpenAI)
+    try:
+        model = get_llm_model()
+    except QuotaExceededError:
+        quota_msg = (
+            "⚠️ የኤፒአይ ክሬዲት አልቋል (ወይም ኮታ ተሟጧል)። እባክዎን የብድር ሂሳብዎን ያረጋግጡ።"
+            if amharic else
+            "⚠️ You are out of API credits (or your quota limit has been exceeded). Please check your API billing or quota to continue."
         )
-        citations.append(citation)
+        return ChatResponse(
+            query=normalized,
+            answer=quota_msg,
+            citations=[],
+            disclaimer="API Quota / Credit Exhausted.",
+        )
 
-    return ChatResponse(
-        query=normalized,
-        answer=synthesized_answer,
-        citations=citations,
-        disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
-    )
+    try:
+        synthesized_answer = _synthesize_answer(normalized, cases, amharic, model=model)
+
+        citations = []
+        for rank, case in enumerate(cases, start=1):
+            start_page = case.metadata.get("start_page", case.metadata.get("page_number", case.metadata.get("page", "")))
+            end_page = case.metadata.get("end_page", start_page)
+            
+            # Format page range display
+            if start_page and end_page and str(start_page) != str(end_page):
+                page_display = f"Pages {start_page}-{end_page}"
+            elif start_page:
+                page_display = f"Page {start_page}"
+            else:
+                page_display = ""
+            
+            citation = Citation(
+                case_number=str(case.metadata.get("case_number", "")),
+                file_number=str(case.metadata.get("case_number", "")),
+                volume=str(case.metadata.get("volume", "")),
+                page_number=str(start_page),
+                page=str(start_page),
+                start_page=str(start_page),
+                end_page=str(end_page),
+                similarity_score=round(case.score, 4),
+                score=round(case.score, 4),
+                match_type=getattr(case, "match_type", "semantic"),
+                source_filename=str(case.metadata.get("source_filename", case.metadata.get("source_file", ""))),
+                source_file=str(case.metadata.get("source_file", case.metadata.get("source_filename", ""))),
+                date=str(case.metadata.get("date", "")),
+                court=str(case.metadata.get("court", "Federal Supreme Court Cassation Division")),
+                holding=_holding(case, amharic, model=model),
+                rank=rank,
+                bench=page_display,
+            )
+            citations.append(citation)
+
+        return ChatResponse(
+            query=normalized,
+            answer=synthesized_answer,
+            citations=citations,
+            disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
+        )
+    except Exception as e:
+        if is_quota_error(e) or isinstance(e, QuotaExceededError):
+            quota_msg = (
+                "⚠️ የኤፒአይ ክሬዲት አልቋል (ወይም ኮታ ተሟጧል)። እባክዎን የብድር ሂሳብዎን (OpenAI / Google) ያረጋግጡ።"
+                if amharic else
+                "⚠️ You are out of API credits (or your quota limit has been exceeded). Please check your OpenAI / Google API billing or quota to continue."
+            )
+            return ChatResponse(
+                query=normalized,
+                answer=quota_msg,
+                citations=[],
+                disclaimer="API Quota / Credit Exhausted.",
+            )
+        raise e
+
 
 
