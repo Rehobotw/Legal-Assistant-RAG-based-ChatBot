@@ -68,6 +68,7 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
                 "5. FALLBACK: If the provided CONTEXT does not contain enough information to answer the specific query:\n"
                 "   - If the query is in Amharic, respond strictly with: \"በተሰጠው የመዝገብ መረጃ ውስጥ ለቀረበው ጥያቄ በቂ መረጃ አልተገኘም።\"\n"
                 "   - If the query is in English, respond strictly with: \"There is insufficient information in the provided case records to answer this query.\""
+                "   -If the context contains multiple different case numbers, YOU MUST IGNORE ALL OF THEM EXCEPT the specific case number requested in the user's query. Answer the question relying ONLY on the facts of the requested case."
             )
 
             prompt_template = ChatPromptTemplate.from_messages([
