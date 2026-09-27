@@ -1,40 +1,497 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
+import { sendChatMessage, fetchChatHistory } from './services/chatApi';
 import './index.css';
-import { sendChatMessage } from './services/chatApi';
 
-const Icon = ({ children, size = 20 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>;
-const Search = () => <Icon><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></Icon>;
-const Plus = () => <Icon><path d="M12 5v14M5 12h14"/></Icon>;
-const Send = () => <Icon><path d="m21 3-7.2 18-3.6-7.4L3 10.1 21 3Z"/></Icon>;
-const Scale = ({ size = 20 }) => <Icon size={size}><path d="M12 3v18M5 7h14M5 7l-3 6h6L5 7Zm14 0-3 6h6l-3-6ZM7 21h10"/></Icon>;
-const Book = () => <Icon><path d="M5 4.5h11a3 3 0 0 1 3 3V20H8a3 3 0 0 0-3 3V4.5Z"/><path d="M5 20h11"/></Icon>;
-const Verify = () => <Icon><path d="m9 12 2 2 4-5"/><path d="M12 3.5 14.3 5l2.7-.1.8 2.5 2.1 1.7-1 2.5.3 2.7-2.4 1.3-1.4 2.3-2.6-.5-2.6.5-1.4-2.3-2.4-1.3.3-2.7-1-2.5 2.1-1.7.8-2.5 2.7.1L12 3.5Z"/></Icon>;
-const Folder = () => <Icon><path d="M3 6.5h7l2 2h9v10.5H3z"/></Icon>;
-const Attachment = () => <Icon><path d="m20 12.5-7.7 7.7a5 5 0 0 1-7.1-7.1l8.2-8.2a3.5 3.5 0 1 1 5 5L10 18.3a2 2 0 0 1-2.9-2.8l7.5-7.5"/></Icon>;
+/* ── Inline SVG Icons ─────────────────────────────────────────── */
+const Icon = ({ children, size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+const SearchIcon = () => <Icon><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></Icon>;
+const PlusIcon = () => <Icon><path d="M12 5v14M5 12h14"/></Icon>;
+const SendIcon = () => <Icon><path d="m21 3-7.2 18-3.6-7.4L3 10.1 21 3Z"/></Icon>;
+const ScaleIcon = ({ size = 20 }) => <Icon size={size}><path d="M12 3v18M5 7h14M5 7l-3 6h6L5 7Zm14 0-3 6h6l-3-6ZM7 21h10"/></Icon>;
+const BookIcon = () => <Icon><path d="M5 4.5h11a3 3 0 0 1 3 3V20H8a3 3 0 0 0-3 3V4.5Z"/><path d="M5 20h11"/></Icon>;
+const VerifyIcon = () => <Icon><path d="m9 12 2 2 4-5"/><path d="M12 3.5 14.3 5l2.7-.1.8 2.5 2.1 1.7-1 2.5.3 2.7-2.4 1.3-1.4 2.3-2.6-.5-2.6.5-1.4-2.3-2.4-1.3.3-2.7-1-2.5 2.1-1.7.8-2.5 2.7.1L12 3.5Z"/></Icon>;
+const FolderIcon = () => <Icon><path d="M3 6.5h7l2 2h9v10.5H3z"/></Icon>;
+const MenuIcon = () => <Icon><path d="M4 6h16M4 12h16M4 18h16"/></Icon>;
+const CloseIcon = () => <Icon><path d="M18 6 6 18M6 6l12 12"/></Icon>;
 
-const historyGroups = [
-  { title: 'Today • ዛሬ', items: [['መ/ቁ 178204', 'Labor Proc. 1156/19 — Termination Notice', 'የጽሑፍ ማስጠንቀቂያ አሰጣጥ ሥነ-ሥርዓት'], ['መ/ቁ 92104', 'Spousal Property Division — Civil Code 1000', 'የውርስ ሀብት ክፍፍል የይርጋ ጊዜ']] },
-  { title: 'Yesterday • ትላንት', items: [['መ/ቁ 198420', 'Commercial Code Art. 347 — Director Fiduciary Duty'], ['መ/ቁ 142109', 'Contract Rescission — Civil Code Arts. 2020–2024']] },
-  { title: 'Previous 7 Days • ያለፉት 7 ቀናት', items: [['መ/ቁ 142851', 'Maritime Code & Multimodal Bill of Lading'], ['መ/ቁ 165412', 'Customs Proclamation 859/2014 Tariff Classification']] },
-];
-
-function Header({ home, language, toggleLanguage }) { return <header className="site-header"><div className="header-inner"><button className="brand" onClick={home}><span className="brand-seal"><Scale size={18}/></span><span><strong>Federal Supreme Court Precedent Assistant</strong><small>የሰበር ችሎት የሕግ ትርጉም ረዳት</small></span></button><div className="header-actions"><button className={`language ${language === 'am' ? 'amharic' : ''}`} type="button" onClick={toggleLanguage} aria-pressed={language === 'am'} title={language === 'am' ? 'Switch to English' : 'ወደ አማርኛ ቀይር'}><span className={language === 'en' ? 'active' : ''}>EN</span><b>|</b><span className={language === 'am' ? 'active' : ''}>አማ</span></button><button className="profile" aria-label="User profile">●</button></div></div></header>; }
-
-function App() {
-  const [view, setView] = useState('home'); const [language, setLanguage] = useState('en'); const [question, setQuestion] = useState(''); const [submitted, setSubmitted] = useState(''); const [active, setActive] = useState('መ/ቁ 178204'); const [saved, setSaved] = useState(false); const [result, setResult] = useState(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const [newInquiryKey, setNewInquiryKey] = useState(0);
-  const ask = async (event) => { event?.preventDefault(); const message = question.trim(); if (!message || loading) return; setSubmitted(message); setQuestion(''); setView('chat'); setError(''); setLoading(true); window.scrollTo(0, 0); try { setResult(await sendChatMessage(message, language)); } catch (requestError) { setResult(null); setError(requestError.message); } finally { setLoading(false); } };
-  const newInquiry = () => { setView('chat'); setSubmitted(''); setQuestion(''); setResult(null); setError(''); setSaved(false); setActive(null); setNewInquiryKey((key) => key + 1); };
-  return <div className="portal"><Header home={() => setView('home')} language={language} toggleLanguage={() => setLanguage((current) => current === 'en' ? 'am' : 'en')}/>{view === 'home' ? <Home start={newInquiry} question={question} setQuestion={setQuestion} ask={ask}/> : <Chat active={active} setActive={setActive} submitted={submitted} question={question} setQuestion={setQuestion} ask={ask} saved={saved} setSaved={setSaved} result={result} error={error} loading={loading} language={language} newInquiryKey={newInquiryKey} onNew={newInquiry}/>}</div>;
+/* ── Header ───────────────────────────────────────────────────── */
+function Header({ onHome, onToggleSidebar, showSidebarToggle }) {
+  const { language, toggleLanguage, t } = useLanguage();
+  return (
+    <header className="site-header">
+      <div className="header-inner">
+        <div className="header-left">
+          {showSidebarToggle && (
+            <button className="sidebar-toggle" onClick={onToggleSidebar}
+              aria-label="Toggle sidebar" type="button">
+              <MenuIcon />
+            </button>
+          )}
+          <button className="brand" onClick={onHome} type="button">
+            <span className="brand-seal"><ScaleIcon size={18} /></span>
+            <span>
+              <strong>{t.brandTitle}</strong>
+              <small>{t.brandSubtitle}</small>
+            </span>
+          </button>
+        </div>
+        <div className="header-actions">
+          <button className={`lang-toggle ${language === 'am' ? 'amharic' : ''}`}
+            type="button" onClick={toggleLanguage}
+            aria-pressed={language === 'am'}
+            title={t.switchLang}>
+            <span className={language === 'en' ? 'active' : ''}>EN</span>
+            <b>|</b>
+            <span className={language === 'am' ? 'active' : ''}>አማ</span>
+          </button>
+          <button className="profile" aria-label="User profile">●</button>
+        </div>
+      </div>
+    </header>
+  );
 }
 
-function Composer({ question, setQuestion, ask, home = false }) { return <form className={`composer ${home ? 'home-composer' : ''}`} onSubmit={ask}><Search/><input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={home ? 'e.g. ውል ማፍረስ ወይም የይርጋ ጊዜ መቋረጥ (or Cass. File No. 182941)...' : 'Ask about a case, binding ruling, or legal question in English or Amharic (አማርኛ)…'} /><button className="inquire">{home ? 'Inquire' : <><span>Search Precedents</span><Send/></>}</button></form>; }
-function Home({ start, question, setQuestion, ask }) { return <main className="homepage"><section className="hero"><div className="hero-glow"/><div className="hero-content"><div className="court-chip"><i/> <span>Federal Supreme Court of Ethiopia • Cassation Bench</span><b>•</b><span>የኢትዮጵያ ፌዴራል ጠቅላይ ፍርድ ቤት</span></div><h1>Find binding precedent in seconds, not hours</h1><h2>አስገዳጅ የሰበር የሕግ ትርጉሞችን በቅጽበት ይፈልጉ</h2><p>Assisting Federal Judges and legal researchers in searching binding Cassation Division rulings to ensure faster, more consistent judicial outcomes across all jurisdictions.</p><button className="primary-cta" onClick={start}>Start Chat / ምክክር ይጀምሩ <span>→</span></button><div className="credentials"><span><Book/> Volumes 1–25 Indexed</span><b>•</b><span><Scale/> Over 4,800+ Binding Legal Principles</span><b>•</b><span><Verify/> Verified Gazette Citations</span></div></div></section><section className="pillars"><Pillar number="01" icon="⌁" title="Natural Language Legal Query" text="Search by facts, contract clauses, or procedural issues in plain Amharic or English without complex syntax codes." foot="Amharic & English Semantics"/><Pillar number="02" icon="⚖" title="Strictly Sourced to Docket" text="Every synthesized answer is anchored to verified File Number (መ.ቁ), bench composition, volume, and sitting date." foot="Proclamation No. 454/2005 Verified"/><Pillar number="03" icon="✓" title="Non-Binding Dicta Filtered" text="Strict isolation of controlling ratio decidendi from non-binding obiter dictum across all regional appeals." foot="Judicial Weight Verification"/></section><section className="workspace-preview"><div className="preview-heading"><div><label>Verified Bench Register</label><h2>Precedent Retrieval Workspace</h2><p>Query authoritative decisions directly or inspect current cassation rolls.</p></div><span className="engine"><i/> Cassation Gazette Engine v2.4 Active</span></div><div className="preview-grid"><div><Composer home question={question} setQuestion={setQuestion} ask={ask}/><div className="holdings-head"><label>Illustrative Controlled Holdings</label><span>Updated Vol. 25</span></div><Holding file="142109" date="Meskerem 14, 2012 E.C. (Civil Bench)" title="Interpretation of Article 2020 & 2024 of Civil Code regarding contract rescission" quote="ማስጠንቀቂያ ሳይሰጥ ውልን ማቋረጥ የሚቻለው በውሉ በግልጽ ማስጠንቀቂያ ሳያስፈልግ..." volume="Vol. 22, pp. 112–118"/><Holding file="198420" date="Tahsas 04, 2015 E.C. (Commercial Bench)" title="Commercial Code Art. 347: Director fiduciary liability in share transfers" quote="የአክሲዮን ማኅበር የቦርድ አመራሮች ባልተፈቀደ አግባብ አክሲዮን ሲያስተላልፉ..." volume="Vol. 24, pp. 45–52"/></div><aside className="stat-side"><article><label>Statutory Foundation</label><h3>Proclamation 454/2005</h3><p>Interpretation of a law rendered by the Federal Supreme Court Cassation Division with not less than five judges shall be binding on all Federal and Regional Courts of all levels.</p><small>አንቀጽ 2 (1) — በፌዴራል ጠቅላይ ፍርድ ቤት የሰበር መሠረታዊ የሕግ ትርጉም አስገዳጅነት አለው።</small></article><article><label>Dossier Metrics</label><Metric text="Civil & Commercial" value="2,740 Holdings"/><Metric text="Criminal Law & Procedure" value="1,215 Holdings"/><Metric text="Labour & Administrative" value="845 Holdings"/></article></aside></div></section><div className="disclaimer">Official Judicial Research Tool — Strictly for authorized research purposes and not a substitute for independent judicial evaluation. Federal Supreme Court of Ethiopia.</div></main>; }
-const Pillar = ({ number, icon, title, text, foot }) => <article className="pillar"><div className="pillar-icon">{icon}</div><label>{number} / Pillar</label><h3>{title}</h3><p>{text}</p><small>{foot}</small></article>;
-const Metric = ({ text, value }) => <div className="metric"><span>{text}</span><b>{value}</b></div>;
-const Holding = ({ file, date, title, quote, volume }) => <article className="holding"><div><span className="binding">Binding Ruling</span><b>Cass. File No. {file}</b><small>{date}</small></div><h4>{title}</h4><blockquote>{quote}</blockquote><footer><span>5-Judge Cassation Panel</span><b>{volume}</b></footer></article>;
+/* ── Home Page ─────────────────────────────────────────────────── */
+function Home({ onStart, question, setQuestion, onAsk }) {
+  const { t } = useLanguage();
+  return (
+    <main className="homepage">
+      <section className="hero">
+        <div className="hero-glow" />
+        <div className="hero-content">
+          <div className="court-chip">
+            <i /><span>{t.courtChip}</span>
+          </div>
+          <h1>{t.heroTitle}</h1>
+          <h2>{t.heroSubtitle}</h2>
+          <p>{t.heroDescription}</p>
+          <button className="primary-cta" onClick={onStart} type="button">
+            {t.startChat}
+          </button>
+          <div className="credentials">
+            <span><BookIcon /> {t.volumes}</span><b>•</b>
+            <span><ScaleIcon /> {t.holdings}</span><b>•</b>
+            <span><VerifyIcon /> {t.citations}</span>
+          </div>
+        </div>
+      </section>
 
-function Chat({ active, setActive, submitted, question, setQuestion, ask, saved, setSaved, result, error, loading, language, newInquiryKey, onNew }) { const inputRef = useRef(null); useEffect(() => { inputRef.current?.focus(); }, [newInquiryKey]); const placeholder = language === 'am' ? 'ስለ ጉዳይ፣ አስገዳጅ ውሳኔ ወይም የሕግ ጥያቄ በአማርኛ ይጠይቁ…' : 'Ask about a case, binding ruling, or legal question in English…'; const submitFromKeyboard = (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask(event); } }; return <main className="chat-workspace"><aside className="history"><button className="new-inquiry" type="button" onClick={onNew}><Plus/> New Inquiry • አዲስ ምክክር</button><div className="history-search"><Search/><input placeholder="Search docket history..."/></div><div className="history-groups">{historyGroups.map((group) => <div className="history-group" key={group.title}><label>{group.title}</label>{group.items.map(([file, title, amharic]) => <button key={file} className={active === file ? 'selected' : ''} onClick={() => setActive(file)}><div><b>{file}</b><small>{file === 'መ/ቁ 178204' ? '10:42 AM' : file === 'መ/ቁ 92104' ? '10:45 AM' : 'Civil Bench'}</small></div><strong>{title}</strong>{amharic && <em>{amharic}</em>}</button>)}</div>)}</div><div className="chamber"><div><span><Scale/></span><p><b>Hon. Justice Chamber</b><small>Federal Supreme Court</small></p></div><footer><a><Folder/> Archived Dockets</a><a><Book/> Volume Index</a></footer></div></aside><section className="chat-area"><div className="chat-content"><div className="integrity"><span><Scale/></span><div><h2>Cassation Division Precedent Engine <b>Proclamation 1234/2021 Art. 2(1)</b></h2><p>Interpretations rendered by the Federal Supreme Court Cassation Division with five or more judges are legally binding on all federal and regional courts. Queries return verifiable citations indexed from official FSC Law Reports.</p></div></div><div className="thread">{submitted ? <><div className="user-message"><label>Hon. Justice Inquiry • 10:42 AM <span>⚖</span></label><p>{submitted}</p></div>{loading && <p className="request-status">Searching the precedent register…</p>}{error && <p className="request-status error">{error}</p>}{!loading && !error && <Assistant saved={saved} setSaved={setSaved} result={result}/>}</> : <p className="new-inquiry-empty">{language === 'am' ? 'አዲስ ምክክር ተጀምሯል። ጥያቄዎን ከታች ያስገቡ።' : 'A new inquiry is ready. Enter your legal research question below.'}</p>}</div></div><form className="dock" onSubmit={ask}><div className="dock-box"><div className="dock-input"><Search/><textarea ref={inputRef} value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={placeholder} rows="2" onKeyDown={submitFromKeyboard}/></div><div className="dock-tools"><span><Book/> {language === 'am' ? 'የፍለጋ ቋንቋ፦ አማርኛ' : 'Search language: English'}</span><button type="button" className="filter">Volume Filter: All 25</button><button type="button" className="attach"><Attachment/></button><button className="search-btn" disabled={loading}>{loading ? 'Searching…' : <>{language === 'am' ? 'ውሳኔዎችን ፈልግ' : 'Search Precedents'} <Send/></>}</button></div></div></form></section></main>; }
-function Assistant({ saved, setSaved, result }) { return <div className="assistant-message"><label><span><Scale/></span> FSC Judicial Precedent Retrieval <i>• 10:43 AM</i></label><article><div className="legal-holding"><label>Retrieved source records</label><p>{result?.answer || 'No source-backed results are available for this inquiry.'}</p></div><Citation saved={saved} setSaved={setSaved} citations={result?.citations || []}/></article></div>; }
-const Finding = ({ title, text }) => <div><Verify/><p><b>{title}</b><span>{text}</span></p></div>;
-const Citation = ({ saved, setSaved, citations }) => !citations.length ? <p className="request-status">No cited cassation decisions were returned.</p> : <>{citations.map((citation) => <section className="citation-card" key={`${citation.file_number}-${citation.rank}`}><header><span><Verify/> Ranked precedent #{citation.rank} • ውሳኔ መዝገብ</span><b>{citation.score ? `${Math.round(citation.score * 100)}% match` : 'Cassation Division'}</b></header><div className="citation-body"><div className="case-title"><div><label>Court</label><h3>{citation.court}</h3><p>{citation.date || 'Date not available in source metadata'}</p></div><div><label>Cassation File No.</label><h3>መ/ቁ {citation.file_number}</h3><p>{citation.volume}{citation.page ? `, p. ${citation.page}` : ''}</p></div></div><label>Source-linked holding</label><blockquote>{citation.holding}</blockquote><footer><button onClick={() => setSaved(!saved)} type="button">{saved ? '✓ Saved to Case Dossier' : '⊕ Save to Case Dossier'}</button><small><Verify/> Verify against official FSC reporter</small></footer></div></section>)}</>;
-export default App;
+      <section className="pillars">
+        <Pillar number="01" icon="⌁" title={t.pillar1Title}
+          text={t.pillar1Text} foot={t.pillar1Foot} />
+        <Pillar number="02" icon="⚖" title={t.pillar2Title}
+          text={t.pillar2Text} foot={t.pillar2Foot} />
+        <Pillar number="03" icon="✓" title={t.pillar3Title}
+          text={t.pillar3Text} foot={t.pillar3Foot} />
+      </section>
+
+      <div className="disclaimer">{t.disclaimer}</div>
+    </main>
+  );
+}
+
+const Pillar = ({ number, icon, title, text, foot }) => (
+  <article className="pillar">
+    <div className="pillar-icon">{icon}</div>
+    <label>{number} / Pillar</label>
+    <h3>{title}</h3>
+    <p>{text}</p>
+    <small>{foot}</small>
+  </article>
+);
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+function Sidebar({ history, activeSessionId, onSelectSession, onNew, open, onClose }) {
+  const { t } = useLanguage();
+  const [search, setSearch] = useState('');
+
+  const grouped = groupHistory(history, t);
+
+  // filter
+  const filtered = search.trim()
+    ? grouped.map((g) => ({
+        ...g,
+        items: g.items.filter((item) =>
+          item.title.toLowerCase().includes(search.toLowerCase()),
+        ),
+      })).filter((g) => g.items.length > 0)
+    : grouped;
+
+  return (
+    <>
+      {/* Mobile overlay */}
+      {open && <div className="sidebar-overlay" onClick={onClose} />}
+      <aside className={`history ${open ? 'open' : ''}`}>
+        <button className="sidebar-close-mobile" onClick={onClose} type="button">
+          <CloseIcon />
+        </button>
+        <button className="new-inquiry" type="button" onClick={() => { onNew(); onClose(); }}>
+          <PlusIcon /> {t.newInquiry}
+        </button>
+        <div className="history-search">
+          <SearchIcon />
+          <input placeholder={t.searchHistory} value={search}
+            onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="history-groups">
+          {filtered.length === 0 && (
+            <p className="no-history">{t.noHistory}</p>
+          )}
+          {filtered.map((group) => (
+            <div className="history-group" key={group.label}>
+              <label>{group.label}</label>
+              {group.items.map((item) => (
+                <button key={item.id}
+                  className={activeSessionId === item.id ? 'selected' : ''}
+                  onClick={() => { onSelectSession(item.id); onClose(); }}>
+                  <strong>{item.title}</strong>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="chamber">
+          <div>
+            <span><ScaleIcon /></span>
+            <p><b>{t.chamberTitle}</b><small>{t.chamberSub}</small></p>
+          </div>
+          <footer>
+            <a href="#"><FolderIcon /> {t.archivedDockets}</a>
+            <a href="#"><BookIcon /> {t.volumeIndex}</a>
+          </footer>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function groupHistory(sessions, t) {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+  const groups = { today: [], yesterday: [], previous: [] };
+
+  for (const s of sessions) {
+    const d = new Date(s.created_at);
+    if (d >= todayStart) groups.today.push(s);
+    else if (d >= yesterdayStart) groups.yesterday.push(s);
+    else groups.previous.push(s);
+  }
+
+  const result = [];
+  if (groups.today.length) result.push({ label: t.today, items: groups.today });
+  if (groups.yesterday.length) result.push({ label: t.yesterday, items: groups.yesterday });
+  if (groups.previous.length) result.push({ label: t.previous, items: groups.previous });
+  return result;
+}
+
+/* ── Chat View ────────────────────────────────────────────────── */
+function ChatView({ onNew }) {
+  const { language, t } = useLanguage();
+  const inputRef = useRef(null);
+  const threadRef = useRef(null);
+
+  // Messages: [{role: 'user'|'assistant', content, citations?, loading?, error?}]
+  const [messages, setMessages] = useState([]);
+  const [question, setQuestion] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [processStep, setProcessStep] = useState(0);
+  const [sessionId, setSessionId] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Cycle process steps while loading
+  useEffect(() => {
+    if (!loading) {
+      setProcessStep(0);
+      return;
+    }
+    setProcessStep(1);
+    const timer1 = setTimeout(() => setProcessStep(2), 1200);
+    const timer2 = setTimeout(() => setProcessStep(3), 2800);
+    const timer3 = setTimeout(() => setProcessStep(4), 4500);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+    };
+  }, [loading]);
+
+  const getProcessText = (step) => {
+    switch (step) {
+      case 1: return t.step1;
+      case 2: return t.step2;
+      case 3: return t.step3;
+      case 4: return t.step4;
+      default: return t.searching;
+    }
+  };
+
+  // Load history on mount
+  useEffect(() => {
+    fetchChatHistory().then(setHistory).catch(() => {});
+  }, []);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
+  }, [messages, processStep]);
+
+  // Focus input
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleNewInquiry = useCallback(() => {
+    setMessages([]);
+    setQuestion('');
+    setSessionId(null);
+    setActiveSessionId(null);
+    setLoading(false);
+    inputRef.current?.focus();
+  }, []);
+
+  const ask = useCallback(async (e) => {
+    e?.preventDefault();
+    const text = question.trim();
+    if (!text || loading) return;
+
+    setQuestion('');
+
+    // APPEND user message — never overwrite
+    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    setLoading(true);
+
+    try {
+      const result = await sendChatMessage(text, language, sessionId);
+
+      // Store session ID from the first response
+      if (result.session_id) {
+        setSessionId(result.session_id);
+        setActiveSessionId(result.session_id);
+      }
+
+      // APPEND assistant message
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: result.answer,
+          citations: result.citations || [],
+        },
+      ]);
+
+      // Refresh history
+      fetchChatHistory().then(setHistory).catch(() => {});
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: '', error: err.message },
+      ]);
+    } finally {
+      setLoading(false);
+      inputRef.current?.focus();
+    }
+  }, [question, loading, language, sessionId]);
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(e); }
+  };
+
+  return (
+    <main className="chat-workspace">
+      <Sidebar history={history} activeSessionId={activeSessionId}
+        onSelectSession={setActiveSessionId} onNew={handleNewInquiry}
+        open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      <section className="chat-area">
+        <div className="chat-content" ref={threadRef}>
+          {/* Integrity banner */}
+          <div className="integrity">
+            <span><ScaleIcon /></span>
+            <div>
+              <h2>{t.integrityTitle} <b>{t.integrityTag}</b></h2>
+              <p>{t.integrityDesc}</p>
+            </div>
+          </div>
+
+          {/* Thread */}
+          <div className="thread">
+            {messages.length === 0 && (
+              <p className="new-inquiry-empty">{t.emptyChat}</p>
+            )}
+
+            {messages.map((msg, i) =>
+              msg.role === 'user' ? (
+                <UserMessage key={i} content={msg.content} />
+              ) : (
+                <AssistantMessage key={i} content={msg.content}
+                  citations={msg.citations} error={msg.error} />
+              ),
+            )}
+
+            {loading && (
+              <p className="request-status animated-status">
+                <span className="spinner" />
+                <span>{getProcessText(processStep)}</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Dock / Input */}
+        <form className="dock" onSubmit={ask}>
+          <div className="dock-box">
+            <div className="dock-input">
+              <SearchIcon />
+              <textarea ref={inputRef} value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder={t.composerPlaceholder}
+                rows="2" onKeyDown={onKeyDown} />
+            </div>
+            <div className="dock-tools">
+              <span><BookIcon /> {t.searchLang}</span>
+              <button type="button" className="filter">{t.volumeFilter}</button>
+              <button className="search-btn" disabled={loading} type="submit">
+                {loading ? t.sendingLabel : <><span className="send-label">{t.send}</span> <SendIcon /></>}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        {/* Mobile sidebar toggle floater is handled by the Header */}
+      </section>
+
+      {/* Provide sidebar toggle to header */}
+      <SidebarToggleBridge onToggle={() => setSidebarOpen((v) => !v)} />
+    </main>
+  );
+}
+
+/* A tiny bridge to allow the header's sidebar toggle to work */
+let _sidebarToggleFn = null;
+function SidebarToggleBridge({ onToggle }) {
+  useEffect(() => { _sidebarToggleFn = onToggle; return () => { _sidebarToggleFn = null; }; }, [onToggle]);
+  return null;
+}
+
+/* ── Message Components ───────────────────────────────────────── */
+function UserMessage({ content }) {
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <div className="user-message">
+      <label>Hon. Justice Inquiry • {time} <span>⚖</span></label>
+      <p>{content}</p>
+    </div>
+  );
+}
+
+function AssistantMessage({ content, citations, error }) {
+  const { t } = useLanguage();
+  const [saved, setSaved] = useState(false);
+  const now = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="assistant-message">
+      <label>
+        <span><ScaleIcon /></span> {t.assistantLabel} <i>• {time}</i>
+      </label>
+      <article>
+        {error ? (
+          <p className="request-status error">{error}</p>
+        ) : (
+          <>
+            <div className="legal-holding">
+              <label>{t.retrievedLabel}</label>
+              <p>{content || t.noResults}</p>
+            </div>
+            <Citations citations={citations || []} saved={saved} setSaved={setSaved} />
+          </>
+        )}
+      </article>
+    </div>
+  );
+}
+
+function Citations({ citations, saved, setSaved }) {
+  const { t } = useLanguage();
+  if (!citations.length) {
+    return <p className="request-status">{t.noCitations}</p>;
+  }
+  return citations.map((c) => (
+    <section className="citation-card" key={`${c.file_number}-${c.rank}`}>
+      <header>
+        <span><VerifyIcon /> {t.rankedPrecedent} #{c.rank} • ውሳኔ መዝገብ</span>
+        <b>{c.score ? `${Math.round(c.score * 100)}% ${t.match}` : t.cassationDivision}</b>
+      </header>
+      <div className="citation-body">
+        <div className="case-title">
+          <div>
+            <label>{t.court}</label>
+            <h3>{c.court}</h3>
+            <p>{c.date || t.dateNotAvailable}</p>
+          </div>
+          <div>
+            <label>{t.cassFileNo}</label>
+            <h3>መ/ቁ {c.file_number}</h3>
+            <p>{c.volume}{c.page ? `, p. ${c.page}` : ''}</p>
+          </div>
+        </div>
+        <label>{t.sourceHolding}</label>
+        <blockquote>{c.holding}</blockquote>
+        <footer>
+          <button onClick={() => setSaved(!saved)} type="button">
+            {saved ? t.savedDossier : t.saveDossier}
+          </button>
+          <small><VerifyIcon /> {t.verifyLabel}</small>
+        </footer>
+      </div>
+    </section>
+  ));
+}
+
+/* ── App Root ─────────────────────────────────────────────────── */
+function AppContent() {
+  const [view, setView] = useState('home');
+  const [question, setQuestion] = useState('');
+
+  const goHome = () => setView('home');
+  const startChat = () => { setView('chat'); setQuestion(''); };
+  const askFromHome = (e) => {
+    e?.preventDefault();
+    if (!question.trim()) return;
+    setView('chat');
+  };
+
+  return (
+    <div className="portal">
+      <Header onHome={goHome}
+        showSidebarToggle={view === 'chat'}
+        onToggleSidebar={() => _sidebarToggleFn?.()} />
+      {view === 'home' ? (
+        <Home onStart={startChat} question={question}
+          setQuestion={setQuestion} onAsk={askFromHome} />
+      ) : (
+        <ChatView onNew={startChat} />
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AppContent />
+    </LanguageProvider>
+  );
+}

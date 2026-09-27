@@ -27,13 +27,7 @@ def retrieve_cases(query: str, limit: int | None = None) -> list[RetrievedCase]:
         if not case_number or case_number in seen_case_numbers:
             continue
         seen_case_numbers.add(case_number)
-        record = store.get(where={"case_number": case_number}, include=["documents", "metadatas"])
-        chunks = sorted(
-            zip(record.get("documents", []), record.get("metadatas", [])),
-            key=lambda item: item[1].get("chunk_index", 0),
-        )
-        full_record = "\n\n".join(chunk for chunk, _ in chunks) or document.page_content
-        cases.append(RetrievedCase(full_record, document.metadata, float(score)))
+        cases.append(RetrievedCase(document.page_content, document.metadata, float(score)))
         if len(cases) == (limit or settings.rag_top_k):
             break
     return cases

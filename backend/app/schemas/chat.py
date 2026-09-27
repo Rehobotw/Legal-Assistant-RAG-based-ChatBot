@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -19,6 +21,7 @@ class ChatRequest(BaseModel):
     # A file number or a short Amharic legal term can be a valid lookup.
     message: str = Field(min_length=1, max_length=4000)
     language: str = Field(default="auto", pattern="^(auto|en|am)$")
+    session_id: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -34,3 +37,4 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     disclaimer: str
+    session_id: str | None = None
