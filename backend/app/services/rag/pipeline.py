@@ -1,4 +1,4 @@
-"""Grounded RAG query pipeline; every legal statement is attached to a case."""
+import re
 
 from app.core.config import settings
 from app.schemas.chat import ChatResponse, Citation
@@ -7,6 +7,25 @@ from app.services.rag.retriever import RetrievedCase, retrieve_cases
 
 def _is_amharic(message: str, language: str) -> bool:
     return language == "am" or (language == "auto" and any("\u1200" <= char <= "\u137f" for char in message))
+
+
+def _is_casual_greeting(message: str) -> bool:
+    """Detect non-legal casual inputs or standard greetings."""
+    greetings = {
+        "hi", "hello", "hey", "greetings", "good morning", "good afternoon",
+        "good evening", "howdy", "ሰላም", "ሰላምታ", "ጤና ይስጥልኝ"
+    }
+    clean = re.sub(r"[^\w\s\u1200-\u137f]", "", message.strip().lower())
+    return clean in greetings
+
+
+def _is_context_sufficient(cases: list[RetrievedCase]) -> bool:
+    """Evaluate whether retrieved context contains substantive legal facts/arguments."""
+    if not cases:
+        return False
+    total_content_length = sum(len(c.content.strip()) for c in cases)
+    return total_content_length >= 30
+
 
 
 def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
@@ -68,7 +87,6 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
 
             context_str = _format_context(cases)
 
-
             system_instruction = (
                 "You are an assistant answering questions based strictly on the provided context. "
                 "If the user's query is a standard greeting, respond politely without using context. "
@@ -81,7 +99,7 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
                 "3. LEGAL SYNTHESIS & STRUCTURE:\n"
                 "   - State the core legal dispute clearly.\n"
                 "   - Explicitly identify and mention key details present in the context: Volume Number, Cassation File Number, Parties involved (Applicant/አመልካች and Respondent/ተጠሪ), specific dates, workplace roles, and applicable Proclamations (e.g., Proclamation No. 377/2003 or አዋጅ ቁጥር 377/96).\n"
-                "   - Summarize the procedural facts and the specific legal error or jurisdictional question submitted to the Cassation Court.\n"
+                "   - Summarize the procedural facts and the specific legal error or jurisdictional question submitted to the Cassation Court in chronological order (Facts -> Legal Issue -> Arguments -> Court Reasoning -> Ruling).\n"
                 "4. TERMINOLOGY: Use standard Ethiopian legal terminology appropriate for the output language (e.g., Material Jurisdiction / የሥረ ነገር ሥልጣን, Fundamental Error of Law / መሠረታዊ የሕግ ስህተት).\n"
                 "5. FALLBACK: If the provided CONTEXT is empty or does not contain the answer to the user's query (and the query is not a standard greeting), output EXACTLY: "
                 "'I can only answer questions related to the uploaded documents. Could you please rephrase your question?'\n"
@@ -101,12 +119,7 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
         except Exception as e:
             print(f"LLM chain synthesis failed ({e}), falling back to default handling.")
 
-    # Fallback if model is None or invocation fails
     if not cases:
-        greetings = {"hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "howdy", "ሰላም", "ሰላምታ", "ጤና ይስጥልኝ"}
-        clean_query = query.strip().lower()
-        if clean_query in greetings:
-            return "ሰላም! እንዴት ልረዳዎት እችላለሁ?" if amharic else "Hello! How can I help you today?"
         return default_fallback_response
 
     # Clean fallback synthesis if LLM key is missing or calls time out
@@ -128,6 +141,18 @@ def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, mo
 def answer_query(message: str, language: str = "auto") -> ChatResponse:
     normalized = " ".join(message.split())
     amharic = _is_amharic(normalized, language)
+
+    # 1. Intent Pre-Check / Routing for Casual Inputs
+    if _is_casual_greeting(normalized):
+        greeting_text = "ሰላም! እንዴት ልረዳዎት እችላለሁ?" if amharic else "Hello! How can I help you today with your legal precedent research?"
+        return ChatResponse(
+            query=normalized,
+            answer=greeting_text,
+            citations=[],
+            disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
+        )
+
+    # 2. Retrieve cases from Vector Store
     try:
         cases = retrieve_cases(normalized)
     except (ImportError, RuntimeError) as error:
@@ -136,6 +161,16 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
             answer=("የውሳኔ መረጃ ጠቋሚው ገና አልተዘጋጀም።" if amharic else "The precedent index is not ready yet."),
             citations=[],
             disclaimer=str(error),
+        )
+
+    # 3. Context Sufficiency Check
+    if not _is_context_sufficient(cases):
+        fallback_text = "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
+        return ChatResponse(
+            query=normalized,
+            answer=fallback_text,
+            citations=[],
+            disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
         )
 
     # Instantiate model once for the request if API key is present
@@ -176,3 +211,4 @@ def answer_query(message: str, language: str = "auto") -> ChatResponse:
         citations=citations,
         disclaimer="Research aid only. Confirm the complete ruling and binding status in the official Federal Supreme Court reporter.",
     )
+

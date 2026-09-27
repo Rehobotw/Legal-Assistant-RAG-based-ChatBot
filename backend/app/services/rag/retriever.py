@@ -26,31 +26,34 @@ def _extract_case_number(query: str) -> str | None:
 
 
 def _retrieve_parent_document_window(
-    store, case_number: str, target_chunk_index: int | None = None
+    store, case_number: str
 ) -> tuple[str, dict]:
-    """Retrieve parent document chunks for a case_number and sort them chronologically by chunk_index."""
+    """Retrieve all chunks for a case_number, deduplicated and sorted chronologically by chunk_index to extract the full document."""
     try:
         case_docs = store.get(where={"case_number": case_number}, include=["documents", "metadatas"])
         if case_docs and case_docs.get("documents"):
             docs = case_docs["documents"]
             metas = case_docs["metadatas"]
-            paired = sorted(zip(metas, docs), key=lambda x: x[0].get("chunk_index", 0))
 
-            if target_chunk_index is not None and len(paired) > 6:
-                start_idx = max(0, target_chunk_index - 1)
-                end_idx = min(len(paired), target_chunk_index + 2)
-                paired = paired[start_idx:end_idx]
+            seen_indexes = set()
+            unique_paired = []
+            for meta, doc in zip(metas, docs):
+                idx = meta.get("chunk_index", 0)
+                if idx not in seen_indexes:
+                    seen_indexes.add(idx)
+                    unique_paired.append((meta, doc))
 
+            paired = sorted(unique_paired, key=lambda x: x[0].get("chunk_index", 0))
             full_content = "\n\n".join(doc for _, doc in paired)
             meta = {"case_number": case_number, **paired[0][0]}
             return full_content, meta
     except Exception as e:
-        print(f"Parent window retrieval failed for case {case_number}: {e}")
+        print(f"Parent document retrieval failed for case {case_number}: {e}")
     return "", {}
 
 
-def retrieve_cases(query: str, limit: int | None = None, score_threshold: float = 0.7) -> list[RetrievedCase]:
-    """Retrieve chunks using exact case number metadata filter when present, falling back to similarity search with score thresholding."""
+def retrieve_cases(query: str, limit: int | None = None, score_threshold: float = 0.65) -> list[RetrievedCase]:
+    """Retrieve all relevant case chunks across multiple source documents exceeding similarity score threshold."""
     store = get_ready_vector_store()
     target_k = limit or settings.rag_top_k
     cases: list[RetrievedCase] = []
@@ -64,31 +67,30 @@ def retrieve_cases(query: str, limit: int | None = None, score_threshold: float 
             seen_case_numbers.add(extracted_num)
             cases.append(RetrievedCase(content=full_content, metadata=meta, score=1.0))
 
-    # 2. Similarity search for remaining slots with similarity score threshold filtering
+    # 2. Similarity search to fetch all additional top-k relevant source cases above threshold
     if len(cases) < target_k:
         try:
             candidates = store.similarity_search_with_relevance_scores(
                 query,
-                k=target_k * 3,
+                k=target_k * 4,
                 score_threshold=score_threshold,
             )
         except TypeError:
             candidates = store.similarity_search_with_relevance_scores(
                 query,
-                k=target_k * 3,
+                k=target_k * 4,
             )
 
         for document, score in candidates:
             score_val = float(score)
             if score_val < score_threshold:
                 continue
-            c_num = document.metadata.get("case_number")
+            c_num = document.metadata.get("case_number") or document.metadata.get("document_id")
             if not c_num or c_num in seen_case_numbers:
                 continue
             seen_case_numbers.add(c_num)
 
-            target_idx = document.metadata.get("chunk_index")
-            full_content, meta = _retrieve_parent_document_window(store, c_num, target_chunk_index=target_idx)
+            full_content, meta = _retrieve_parent_document_window(store, c_num)
             if not full_content:
                 full_content = document.page_content
                 meta = document.metadata
@@ -100,6 +102,8 @@ def retrieve_cases(query: str, limit: int | None = None, score_threshold: float 
                 break
 
     return cases
+
+
 
 
 

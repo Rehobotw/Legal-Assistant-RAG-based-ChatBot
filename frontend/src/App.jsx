@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { sendChatMessage, fetchChatHistory } from './services/chatApi';
+import { sendChatMessage, fetchChatHistory, fetchSessionDetail } from './services/chatApi';
 import './index.css';
 
 /* ── Inline SVG Icons ─────────────────────────────────────────── */
@@ -210,6 +210,39 @@ function ChatView({ onNew }) {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Refresh history list
+  const refreshHistory = useCallback(() => {
+    fetchChatHistory().then(setHistory).catch(() => {});
+  }, []);
+
+  // Load history list on mount
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  // Handle selecting a session from sidebar
+  const handleSelectSession = useCallback(async (id) => {
+    if (!id) return;
+    setActiveSessionId(id);
+    setSessionId(id);
+    setLoading(true);
+    try {
+      const detail = await fetchSessionDetail(id);
+      if (detail && detail.messages) {
+        const mapped = detail.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+          citations: m.citations || [],
+        }));
+        setMessages(mapped);
+      }
+    } catch (e) {
+      console.error("Failed to load session messages:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Cycle process steps while loading
   useEffect(() => {
     if (!loading) {
@@ -236,11 +269,6 @@ function ChatView({ onNew }) {
       default: return t.searching;
     }
   };
-
-  // Load history on mount
-  useEffect(() => {
-    fetchChatHistory().then(setHistory).catch(() => {});
-  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -291,8 +319,8 @@ function ChatView({ onNew }) {
         },
       ]);
 
-      // Refresh history
-      fetchChatHistory().then(setHistory).catch(() => {});
+      // Refresh sidebar history list
+      refreshHistory();
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -302,7 +330,7 @@ function ChatView({ onNew }) {
       setLoading(false);
       inputRef.current?.focus();
     }
-  }, [question, loading, language, sessionId]);
+  }, [question, loading, language, sessionId, refreshHistory]);
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(e); }
@@ -311,8 +339,9 @@ function ChatView({ onNew }) {
   return (
     <main className="chat-workspace">
       <Sidebar history={history} activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId} onNew={handleNewInquiry}
+        onSelectSession={handleSelectSession} onNew={handleNewInquiry}
         open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
 
       <section className="chat-area">
         <div className="chat-content" ref={threadRef}>

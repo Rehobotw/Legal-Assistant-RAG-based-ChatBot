@@ -42,3 +42,28 @@ export async function fetchChatHistory() {
   if (!response.ok) return [];
   return response.json();
 }
+
+export async function fetchSessionDetail(sessionId) {
+  if (!sessionId) return null;
+  let response;
+  try {
+    response = await fetch(`${apiBaseUrl}/chat/history/${sessionId}`);
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  return response.json();
+}
+
+export async function deleteSessionApi(sessionId) {
+  if (!sessionId) return false;
+  try {
+    const response = await fetch(`${apiBaseUrl}/chat/history/${sessionId}`, {
+      method: 'DELETE',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
