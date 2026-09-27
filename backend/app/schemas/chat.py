@@ -16,7 +16,8 @@ class Citation(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=3, max_length=4000)
+    # A file number or a short Amharic legal term can be a valid lookup.
+    message: str = Field(min_length=1, max_length=4000)
     language: str = Field(default="auto", pattern="^(auto|en|am)$")
 
     @field_validator("message")

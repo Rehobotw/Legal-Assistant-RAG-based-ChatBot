@@ -37,3 +37,7 @@ def test_chat_returns_ranked_case_citation(monkeypatch) -> None:
 def test_chat_rejects_blank_query() -> None:
     with pytest.raises(ValidationError):
         ChatRequest(message=" ")
+
+
+def test_chat_accepts_short_case_lookup() -> None:
+    assert ChatRequest(message="1").message == "1"
