@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from app.core.config import settings
-from app.services.rag.vector_store import get_vector_store
+from app.services.rag.vector_store import get_ready_vector_store
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class RetrievedCase:
 
 def retrieve_cases(query: str, limit: int | None = None) -> list[RetrievedCase]:
     """Retrieve chunks, deduplicate by case number, and return rank-ordered cases."""
-    store = get_vector_store()
+    store = get_ready_vector_store()
     candidates = store.similarity_search_with_relevance_scores(
         query,
         k=(limit or settings.rag_top_k) * 3,
@@ -27,7 +27,13 @@ def retrieve_cases(query: str, limit: int | None = None) -> list[RetrievedCase]:
         if not case_number or case_number in seen_case_numbers:
             continue
         seen_case_numbers.add(case_number)
-        cases.append(RetrievedCase(document.page_content, document.metadata, float(score)))
+        record = store.get(where={"case_number": case_number}, include=["documents", "metadatas"])
+        chunks = sorted(
+            zip(record.get("documents", []), record.get("metadatas", [])),
+            key=lambda item: item[1].get("chunk_index", 0),
+        )
+        full_record = "\n\n".join(chunk for chunk, _ in chunks) or document.page_content
+        cases.append(RetrievedCase(full_record, document.metadata, float(score)))
         if len(cases) == (limit or settings.rag_top_k):
             break
     return cases

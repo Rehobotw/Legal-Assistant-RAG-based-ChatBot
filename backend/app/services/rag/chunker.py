@@ -10,7 +10,10 @@ def chunk_cases(cases: list[Document]) -> list[Document]:
         chunk_overlap=220,
         separators=["\n\n", "\n", "።", "፡", " ", ""],
     )
-    chunks = splitter.split_documents(cases)
-    for index, chunk in enumerate(chunks):
-        chunk.metadata["chunk_id"] = index
+    chunks: list[Document] = []
+    for case in cases:
+        case_chunks = splitter.split_documents([case])
+        for index, chunk in enumerate(case_chunks):
+            chunk.metadata["chunk_index"] = index
+        chunks.extend(case_chunks)
     return chunks

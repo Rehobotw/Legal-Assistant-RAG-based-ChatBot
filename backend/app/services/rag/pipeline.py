@@ -22,7 +22,9 @@ def _holding(case: RetrievedCase, amharic: bool) -> str:
         else "Using only the supplied cassation decision, summarize its holding in two short sentences. Do not add facts or legal conclusions not supported by the record."
     )
     model = ChatGoogleGenerativeAI(model=settings.gemini_model, google_api_key=settings.google_api_key, temperature=0)
-    response = model.invoke(f"{instruction}\n\nCASE RECORD:\n{case.content[:6000]}")
+    decision_index = case.content.rfind("ውሳኔ")
+    source_excerpt = case.content[decision_index:] if decision_index >= 0 else case.content
+    response = model.invoke(f"{instruction}\n\nCASE RECORD:\n{source_excerpt[:6000]}")
     return str(response.content).strip()
 
 

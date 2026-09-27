@@ -6,6 +6,10 @@ from app.core.config import settings
 from app.services.rag.embeddings import get_embeddings
 
 
+class IndexNotReadyError(RuntimeError):
+    """Raised when retrieval is attempted before the local corpus is indexed."""
+
+
 def get_vector_store():
     from langchain_chroma import Chroma
 
@@ -14,3 +18,12 @@ def get_vector_store():
         persist_directory=str(Path(settings.chroma_persist_directory)),
         embedding_function=get_embeddings(),
     )
+
+
+def get_ready_vector_store():
+    store = get_vector_store()
+    if store._collection.count() == 0:
+        raise IndexNotReadyError(
+            "The precedent index is empty. Set OPENAI_API_KEY and run `python scripts/ingest.py --recreate` from backend/."
+        )
+    return store
