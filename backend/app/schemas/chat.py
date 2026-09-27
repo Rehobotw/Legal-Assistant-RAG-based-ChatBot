@@ -3,11 +3,16 @@ from pydantic import BaseModel, Field, field_validator
 
 class Citation(BaseModel):
     file_number: str
-    title: str
-    volume: str
-    page: str
-    bench: str
-    binding_status: str = "Illustrative record"
+    title: str = "Federal Supreme Court Cassation decision"
+    date: str = ""
+    court: str = "Federal Supreme Court Cassation Division"
+    holding: str = ""
+    rank: int = 0
+    score: float = 0.0
+    volume: str = ""
+    page: str = ""
+    bench: str = ""
+    binding_status: str = "Source record — verify in official reporter"
 
 
 class ChatRequest(BaseModel):

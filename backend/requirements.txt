@@ -4,6 +4,14 @@ pydantic-settings
 sqlalchemy
 python-jose[cryptography]
 redis
-qdrant-client
 pytest
 httpx
+pytest
+httpx
+langchain
+langchain-community
+langchain-openai
+langchain-google-genai
+langchain-chroma
+langchain-text-splitters
+pypdf
