@@ -14,8 +14,17 @@ htmlcov/
 
 # Logs
 *.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Local credentials and certificates
+*.pem
+*.key
 
 # Runtime data and downloaded model weights
+data/*
+!data/.gitkeep
 backend/data/*
 !backend/data/.gitkeep
 backend/models/*
