@@ -24,6 +24,6 @@ class Settings(BaseSettings):
     rag_data_dir: str = str(BACKEND_DIR / "data/raw")
     chroma_persist_directory: str = str(BACKEND_DIR / "data/chroma")
     chroma_collection_name: str = "fsc_labor_pension_am"
-    rag_top_k: int = 5
+    rag_top_k: int = 10
 
 settings = Settings()

@@ -55,12 +55,6 @@ def _strip_procedural_noise(text: str) -> str:
     """
     Strip raw text verbatim noise, signature notes, page markers, scanner artifacts,
     and layout metadata to focus the LLM on substantive legal content.
-    
-    Removes:
-    - Chunk headers like [መዝገብ ቁጥር: 130665 | Volume: Volume 21 | Chunk: 1/5]
-    - Page markers (--- PAGE 6 ---)
-    - Signature blocks (የማይነበብ የአምስት ዳኞች ፊርማ አለበት)
-    - Scanner noise and repeated separators
     """
     if not text:
         return ""
@@ -71,7 +65,7 @@ def _strip_procedural_noise(text: str) -> str:
     
     # Remove PAGE markers - all variations
     text = re.sub(r"---+\s*PAGE\s+\d+\s*---+", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"PAGE\s+\d+(?:\s+\([^)]+\))?", "", text, flags=re.IGNORECASE)  # "PAGE 6 (Content Page)"
+    text = re.sub(r"PAGE\s+\d+(?:\s+\([^)]+\))?", "", text, flags=re.IGNORECASE)
     text = re.sub(r"ገጽ\s*[:፡]?\s*\d+", "", text)
     
     # Remove signature noise variations
@@ -92,67 +86,73 @@ def _strip_procedural_noise(text: str) -> str:
     
     # Normalize whitespace - preserve paragraph structure
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
-    # Remove very short noise lines (less than 2 characters)
     lines = [line for line in lines if len(line) >= 2]
-    
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    result = re.sub(r"^\s*[፡።፣፤፥፦፧፨\.\,\)\s]+", "", result)
+    return result.strip()
+
+
+def get_llm_models() -> list:
+    """Return a prioritized list of available LLM instances (Gemini, NVIDIA, OpenAI) for seamless failover."""
+    models = []
+    provider_pref = (settings.llm_provider or "auto").lower()
+
+    # 1. Google Gemini (High accuracy for Amharic legal synthesis)
+    if settings.google_api_key and (provider_pref in ("gemini", "auto")):
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            models.append(
+                ChatGoogleGenerativeAI(
+                    model=settings.gemini_model,
+                    google_api_key=settings.google_api_key,
+                    temperature=0,
+                    max_retries=1,
+                    timeout=15,
+                )
+            )
+        except Exception as e:
+            print(f"Failed to initialize Gemini LLM: {e}")
+
+    # 2. NVIDIA API Key
+    if settings.nvidia_api_key and (provider_pref in ("nvidia", "auto")):
+        try:
+            from langchain_openai import ChatOpenAI
+            models.append(
+                ChatOpenAI(
+                    model=settings.nvidia_model,
+                    api_key=settings.nvidia_api_key,
+                    base_url=settings.nvidia_base_url,
+                    temperature=0,
+                    max_retries=1,
+                    timeout=15,
+                )
+            )
+        except Exception as e:
+            print(f"Failed to initialize NVIDIA LLM: {e}")
+
+    # 3. OpenAI API Key
+    if settings.openai_api_key and (provider_pref in ("openai", "auto")):
+        try:
+            from langchain_openai import ChatOpenAI
+            models.append(
+                ChatOpenAI(
+                    model="gpt-4o-mini",
+                    api_key=settings.openai_api_key,
+                    temperature=0,
+                    max_retries=1,
+                    timeout=15,
+                )
+            )
+        except Exception as e:
+            print(f"Failed to initialize OpenAI LLM: {e}")
+
+    return models
 
 
 def get_llm_model():
-    """Instantiate the LLM model based on provider settings (NVIDIA, Gemini, OpenAI)."""
-    provider = (settings.llm_provider or "auto").lower()
-
-    # 1. NVIDIA API Key (OpenAI-compatible)
-    if (provider in ("nvidia", "auto")) and settings.nvidia_api_key:
-        try:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model=settings.nvidia_model,
-                api_key=settings.nvidia_api_key,
-                base_url=settings.nvidia_base_url,
-                temperature=0,
-                max_retries=1,
-                timeout=15,
-            )
-        except Exception as e:
-            if is_quota_error(e):
-                raise QuotaExceededError("NVIDIA API quota / credit error.") from e
-            print(f"Failed to initialize NVIDIA LLM: {e}")
-
-    # 2. Google Gemini API
-    if (provider in ("gemini", "auto")) and settings.google_api_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model=settings.gemini_model,
-                google_api_key=settings.google_api_key,
-                temperature=0,
-                max_retries=1,
-                timeout=10,
-            )
-        except Exception as e:
-            if is_quota_error(e):
-                raise QuotaExceededError("Google Gemini API quota / credit error.") from e
-            print(f"Failed to initialize Gemini LLM: {e}")
-
-    # 3. OpenAI API
-    if (provider in ("openai", "auto")) and settings.openai_api_key:
-        try:
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model="gpt-4o-mini",
-                api_key=settings.openai_api_key,
-                temperature=0,
-                max_retries=1,
-                timeout=10,
-            )
-        except Exception as e:
-            if is_quota_error(e):
-                raise QuotaExceededError("OpenAI API quota / credit error.") from e
-            print(f"Failed to initialize OpenAI LLM: {e}")
-
-    return None
+    """Backward compatibility helper returning primary LLM instance."""
+    models = get_llm_models()
+    return models[0] if models else None
 
 
 def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
@@ -179,7 +179,7 @@ def _holding(case: RetrievedCase, amharic: bool, model=None) -> str:
 
 
 def _extract_decision(content: str) -> str:
-    """A transparent, source-only fallback when Gemini is slow, unavailable, or rate limited."""
+    """A transparent, source-only fallback when LLM is slow, unavailable, or rate limited."""
     cleaned = _strip_procedural_noise(content)
     
     # Find the decision section (first occurrence of ውሳኔ heading)
@@ -224,159 +224,92 @@ def _format_context(cases: list[RetrievedCase]) -> str:
 
 
 def _synthesize_answer(query: str, cases: list[RetrievedCase], amharic: bool, model=None) -> str:
+    """Synthesize a comprehensive legal answer using LLM with proper source citations."""
     default_fallback_response = "I can only answer questions related to the uploaded documents. Could you please rephrase your question?"
 
-    if model is not None:
-        try:
-            from langchain_core.prompts import ChatPromptTemplate
-            from langchain_core.output_parsers import StrOutputParser
-
-            context_str = _format_context(cases)
-            
-            # Debug: Check if context is meaningful
-            if not context_str or len(context_str.strip()) < 50:
-                print(f"⚠️  Warning: Context is too short ({len(context_str)} chars). Falling back to extraction.")
-                # Fall through to fallback
-            else:
-                system_instruction = (
-                    "You are an expert Ethiopian Federal Supreme Court Cassation Division legal analyst. "
-                    "Your objective is to read the full context of a legal decision across all pages and write a comprehensive, "
-                    "logically structured Amharic legal summary.\n\n"
-                    
-                    "## SYNTHESIS REQUIREMENTS:\n\n"
-                    
-                    "1. **NEVER output raw text quotes, signature blocks, or isolated judgment snippets as your main answer.**\n\n"
-                    
-                    "2. **Carefully analyze the text across all pages to extract:**\n"
-                    "   * The original dispute (e.g., illegal termination, property damage, contract breach)\n"
-                    "   * The decision of the **First Instance Court** (የፌዴራል የመጀመሪያ ደረጃ ፍርድ ቤት ውሳኔ) including:\n"
-                    "     - Relevant legal proclamations cited (e.g., አዋጅ ቁጥር 377/96, አዋጅ ቁጥር 1156/2011)\n"
-                    "     - Statute of limitations considerations (ይርጋ)\n"
-                    "     - Monetary compensation awards (exact figures in Birr)\n"
-                    "     - Legal reasoning and findings of fact\n"
-                    "   * The position of the **High Court or Appellate Court** (if applicable)\n"
-                    "   * The **Cassation Division's legal interpretation and final holding** (የሰበር ችሎት ውሳኔ)\n\n"
-                    
-                    "3. **Structure your response using clean, bolded sections:**\n"
-                    "   * **የክርክሩ መነሻ ፍሬ ነገር (Case Background & Dispute)**\n"
-                    "   * **የስር ፍርድ ቤት ውሳኔ (Lower Court Decision & Compensation)**\n"
-                    "     - Include proclamation numbers, legal basis, and exact monetary amounts\n"
-                    "   * **የከፍተኛ ፍርድ ቤት አቋም (High Court Position)** — if applicable\n"
-                    "   * **የሰበር ችሎት የህግ ትርጉም እና ውሳኔ (Cassation Court Legal Interpretation & Holding)**\n\n"
-                    
-                    "4. **For each section, synthesize the information logically:**\n"
-                    "   * DO NOT simply copy verbatim chunks\n"
-                    "   * Extract key facts, legal principles, and holdings\n"
-                    "   * Include specific references to labor proclamations, civil code articles, or other statutes\n"
-                    "   * Preserve exact financial figures and dates\n"
-                    "   * Maintain the chronological flow: Background → First Instance → Appellate → Cassation\n\n"
-                    
-                    "5. **If the retrieved chunks lack substantive details** regarding the facts or arguments, "
-                    "explicitly inform the user that the file context in the database only contains the final procedural order "
-                    "and lacks the detailed background facts.\n\n"
-                    
-                    "6. **Always state the source details clearly at the end:**\n"
-                    "   * Case File Number (መዝገብ ቁጥር)\n"
-                    "   * Volume (ቅጽ)\n"
-                    "   * Page Range (ገጾች)\n"
-                    "   * Court (Federal Supreme Court Cassation Division)\n\n"
-                    
-                    "7. **If the provided context is empty or does not contain the answer to the user's query** "
-                    "(and the query is not a standard greeting), respond that you can only answer questions related to the uploaded documents.\n\n"
-                    
-                    "## FORMATTING RULES:\n"
-                    "* Use clear Amharic legal terminology\n"
-                    "* Bold section headers for readability\n"
-                    "* Write in paragraph form, not bullet points (except for source citations)\n"
-                    "* Maintain professional legal writing tone\n"
-                    "* Ensure accuracy in citing proclamation numbers and amounts\n"
-                )
-
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", system_instruction),
-                    ("user", "Context Provided:\n{formatted_context}\n\nUser Question: {user_query}"),
-                ])
-
-                chain = prompt_template | model | StrOutputParser()
-                result = chain.invoke({"formatted_context": context_str, "user_query": query})
-                answer_text = str(result).strip()
-                if answer_text and len(answer_text) > 50:  # Ensure we got a real response
-                    return answer_text
-                else:
-                    print(f"⚠️  Warning: LLM returned short response ({len(answer_text)} chars)")
-        except Exception as e:
-            if is_quota_error(e):
-                raise QuotaExceededError("You are out of API credits or quota has been exceeded.") from e
-            print(f"⚠️  LLM chain synthesis failed ({e}), falling back to default handling.")
-
-    # Enhanced fallback synthesis if LLM key is missing or calls time out
     if not cases:
         return default_fallback_response
 
-    # Check if we have meaningful content
-    total_content = sum(len(c.content.strip()) for c in cases)
-    if total_content < 100:
-        return (
-            "⚠️ የተገኘው መረጃ በጣም አጭር ነው። ይህ የመዝገብ ቁጥር ምናልባት የመጨረሻውን ውሳኔ ገጽ ብቻ ሊኖረው ይችላል። "
-            "ለተሟላ መረጃ ሌሎች ገጾችን ያስፈልጋል።" if amharic else
-            "⚠️ The retrieved information is very limited. This case file may only contain the final decision page "
-            "in the database. Additional pages would be needed for complete context."
-        )
+    context_str = _format_context(cases)
+    if not context_str or len(context_str.strip()) < 30:
+        return default_fallback_response
+
+    candidate_models = [model] if model is not None else get_llm_models()
+
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
+
+    # Build source citations for the LLM to reference
+    source_info = []
+    for c in cases:
+        c_num = c.metadata.get("case_number", "N/A")
+        vol = c.metadata.get("volume", "")
+        start_page = c.metadata.get("start_page", c.metadata.get("page_number", c.metadata.get("page", "N/A")))
+        end_page = c.metadata.get("end_page", start_page)
+        page_range = f"{start_page}-{end_page}" if str(start_page) != str(end_page) else str(start_page)
+        court = c.metadata.get("court", "Federal Supreme Court Cassation Division")
+        
+        if amharic:
+            source_info.append(f"መዝገብ ቁጥር፦ {c_num}, ቅጽ፦ {vol if vol else 'N/A'}, ገጾች፦ {page_range}, ፍርድ ቤት፦ {court}")
+        else:
+            source_info.append(f"Case No: {c_num}, Volume: {vol if vol else 'N/A'}, Pages: {page_range}, Court: {court}")
     
+    sources_text = "\n".join(f"- {s}" for s in source_info)
+
+    system_instruction = (
+        "You are an expert Ethiopian Federal Supreme Court Cassation Division legal analyst.\n"
+        "Your objective is to read the full context of a legal decision across all pages and write a comprehensive, "
+        "logically structured Amharic legal summary.\n\n"
+
+        "## CRITICAL SYNTHESIS REQUIREMENTS:\n"
+        "1. **NEVER output raw text quotes, unformatted source chunks, procedural noise, or signature blocks.** Synthesize an original, professional response.\n"
+        "2. **DO NOT repeat the case number or volume in a header at the start.** Begin directly with the substantive legal analysis.\n"
+        "3. Carefully analyze the text across all pages to extract:\n"
+        "   * The original dispute (e.g., illegal termination, property damage, contract breach)\n"
+        "   * The decision of the First Instance Court (የፌዴራል የመጀመሪያ ደረጃ ፍርድ ቤት ውሳኔ) including legal proclamations cited (e.g. አዋጅ ቁጥር 377/96), statute of limitations (ይርጋ), monetary awards, and legal reasoning\n"
+        "   * The position of the High Court / Appellate Court (if applicable)\n"
+        "   * The Cassation Division legal interpretation & final holding (የሰበር ችሎት ውሳኔ)\n\n"
+        "4. Structure your response using clean, bolded sections:\n"
+        "   * **የክርክሩ መነሻ ፍሬ ነገር (Case Background & Dispute)**\n"
+        "   * **የስር ፍርድ ቤት ውሳኔ (Lower Court Decision & Compensation)**\n"
+        "   * **የከፍተኛ ፍርድ ቤት አቋም (High Court Position)** (if applicable)\n"
+        "   * **የሰበር ችሎት የህግ ትርጉም እና ውሳኔ (Cassation Court Legal Interpretation & Holding)**\n\n"
+        "5. At the end of your response, add a **Sources** section listing all relevant source citations provided below.\n"
+        "6. When the question asks about a specific case number, focus ONLY on that case and provide comprehensive details from all available pages."
+    )
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", system_instruction),
+        ("user", "Context Provided:\n{formatted_context}\n\nAvailable Sources:\n{sources}\n\nUser Question: {user_query}"),
+    ])
+
+    for m in candidate_models:
+        if m is None:
+            continue
+        try:
+            chain = prompt_template | m | StrOutputParser()
+            result = chain.invoke({"formatted_context": context_str, "sources": sources_text, "user_query": query})
+            answer_text = str(result).strip()
+            if answer_text and len(answer_text) > 50:
+                return answer_text
+        except Exception as e:
+            if is_quota_error(e):
+                print(f"⚠️ Provider quota exceeded ({e}). Trying next model...")
+            else:
+                print(f"⚠️ LLM provider call failed ({e}). Trying next model...")
+
+    # If all LLM providers fail, return a user-friendly message rather than raw text
     if amharic:
-        summary_lines = []
-        source_bullets = []
-        for c in cases:
-            c_num = c.metadata.get("case_number", "N/A")
-            vol = c.metadata.get("volume", "")
-            start_page = c.metadata.get("start_page", c.metadata.get("page_number", c.metadata.get("page", "N/A")))
-            end_page = c.metadata.get("end_page", start_page)
-            court = c.metadata.get("court", "የፌዴራል ጠቅላይ ፍርድ ቤት ሰበር ችሎት")
-            
-            page_range = f"{start_page}-{end_page}" if start_page != end_page else str(start_page)
-            
-            # Get cleaned decision text
-            decision_text = _extract_decision(c.content)
-            if decision_text:
-                summary_lines.append(
-                    f"**መዝገብ ቁጥር {c_num}፦** {decision_text}"
-                )
-            source_bullets.append(
-                f"• መዝገብ ቁጥር፦ {c_num} (ቅጽ፦ {vol if vol else 'N/A'}, ገጾች፦ {page_range}) — {court}"
-            )
-        sources_section = "\n\n**ምንጮች፦**\n" + "\n".join(source_bullets)
-        
-        if summary_lines:
-            return "\n\n".join(summary_lines) + sources_section
-        else:
-            return "የተገኘው መረጃ በቂ አይደለም።" + sources_section
+        return (
+            "ይቅርታ፣ አሁን ለጊዜው ምርምር አገልግሎቱ የማይገኝ ይመስላል። እባክዎ ቆይተው እንደገና ይሞክሩ።\n\n"
+            f"**ምንጮች፦**\n{sources_text}"
+        )
     else:
-        summary_lines = []
-        source_bullets = []
-        for c in cases:
-            c_num = c.metadata.get("case_number", "N/A")
-            vol = c.metadata.get("volume", "")
-            start_page = c.metadata.get("start_page", c.metadata.get("page_number", c.metadata.get("page", "N/A")))
-            end_page = c.metadata.get("end_page", start_page)
-            court = c.metadata.get("court", "Federal Supreme Court Cassation Division")
-            
-            page_range = f"{start_page}-{end_page}" if start_page != end_page else str(start_page)
-            
-            # Get cleaned decision text
-            decision_text = _extract_decision(c.content)
-            if decision_text:
-                summary_lines.append(
-                    f"**Case No. {c_num}:** {decision_text}"
-                )
-            source_bullets.append(
-                f"• Case File No: {c_num} (Volume: {vol if vol else 'N/A'}, Pages: {page_range}) — {court}"
-            )
-        sources_section = "\n\n**Sources:**\n" + "\n".join(source_bullets)
-        
-        if summary_lines:
-            return "\n\n".join(summary_lines) + sources_section
-        else:
-            return "Insufficient information retrieved." + sources_section
+        return (
+            "Apologies, the research service is temporarily unavailable. Please try again in a moment.\n\n"
+            f"**Sources:**\n{sources_text}"
+        )
+
 
 
 def answer_query(message: str, language: str = "auto") -> ChatResponse:

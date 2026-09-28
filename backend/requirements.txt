@@ -14,4 +14,6 @@ langchain-openai
 langchain-google-genai
 langchain-chroma
 langchain-text-splitters
+langchain-huggingface
+sentence-transformers
 pypdf
